@@ -4,8 +4,7 @@
  * Iter 1：组装 13 个核心组件还原效果图整屏
  *   层级（z 轴从下到上）：
  *     1. DotMatrixBackground   点阵背景
- *     2. ScanlineOverlay       扫描线 + 下移高光带
- *     3. 内容流（顶 → 底）    TopBar / Clock / OnAir / DateLine
+ *     2. 内容流（顶 → 底）    TopBar / Clock / OnAir / DateLine
  *                              / NowPlayingBar / PlayerControls
  *                              / DJBubble / UserBubble / ChatInput / Connection
  *     4. PixelPetSwitcher     右下角浮层（漂浮 + 眨眼 + 招呼气泡）
@@ -31,8 +30,8 @@ import {
   OnAirIndicator,
   PixelClock,
   PixelPetSwitcher,
+  PlaybackProgressBar,
   PlayerControls,
-  ScanlineOverlay,
   TopBar,
   UserBubble,
   type PlayerControlAction,
@@ -60,6 +59,8 @@ export default function HomeScreen() {
 
   /* 真实音频播放引擎：替换 v1 的 mock playing/position */
   const radio = useRadioPlayer();
+  /* 播放器动画只在真实播放且未结束时运行，暂停/播完进入 idle 收尾态。 */
+  const animationActive = radio.playing && !radio.ended;
   const [faved, setFaved] = useState(false);
   const [petId, setPetId] = useState<string>('deepseek');
   const [petAction, setPetAction] = useState<PlayerControlAction | null>(null);
@@ -75,10 +76,7 @@ export default function HomeScreen() {
       {/* 第 1 层：点阵背景（全屏） */}
       <DotMatrixBackground />
 
-      {/* 第 2 层：扫描线 + 高光带（全屏） */}
-      <ScanlineOverlay />
-
-      {/* 第 3 层：内容流（宽屏居中 + 限宽，移动端撑满） */}
+      {/* 第 2 层：内容流（宽屏居中 + 限宽，移动端撑满） */}
       <ScrollView
         className="flex-1"
         contentContainerStyle={{
@@ -112,23 +110,31 @@ export default function HomeScreen() {
           <NowPlayingBar
             title={radio.track.title}
             artist={radio.track.artist}
-            trackKey={radio.track.url}
             playing={radio.playing}
-            position={radio.position}
-            duration={radio.duration}
             state={radio.buffering ? 'BUFFERING' : undefined}
-            showWaveform={false}
-            onSeek={radio.seek}
           />
 
           {/* 律动主视觉：用户原版 48 根霓虹频谱条，跟随真实播放状态律动 */}
           <View className="px-4 pt-2 pb-3">
-            <MusicSpectrum active={radio.playing} height={200} />
+            <MusicSpectrum active={animationActive} ended={radio.ended} height={200} />
+          </View>
+
+          {/* Reanimated 播放进度条：位于频谱与控件之间，拖动结束后再提交真实 seek */}
+          <View className="px-4 pb-3">
+            <PlaybackProgressBar
+              position={radio.position}
+              duration={radio.duration}
+              playing={animationActive}
+              ended={radio.ended}
+              trackKey={radio.track.url}
+              onSeek={radio.seek}
+            />
           </View>
 
           {/* 8 按钮控件 — 接到真实播放引擎 */}
           <PlayerControls
-            playing={radio.playing}
+            playing={animationActive}
+            ended={radio.ended}
             faved={faved}
             onPrev={radio.prev}
             onPlayPause={radio.toggle}

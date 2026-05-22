@@ -6,8 +6,17 @@
  *      避免硬翻转造成的"卡顿感"，比直接 setInterval 更高级
  */
 
-import { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, View, Text } from 'react-native';
+import { useEffect, useState } from 'react';
+import { View, Text } from 'react-native';
+import Animated, {
+  Easing,
+  cancelAnimation,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from 'react-native-reanimated';
 
 export interface PixelClockProps {
   /* 是否显示秒级精度（默认 false，仅显示 HH:MM） */
@@ -41,47 +50,55 @@ function useNow(showSeconds: boolean) {
  *   每 1s 一个完整周期，使用 sine 缓动让起伏更自然
  */
 function useColonBreathe() {
-  const opacity = useRef(new Animated.Value(1)).current;
+  const opacity = useSharedValue(1);
+
   useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(opacity, {
-          toValue: 0.78,
+    cancelAnimation(opacity);
+    opacity.value = withRepeat(
+      withSequence(
+        withTiming(0.78, {
           duration: 500,
           easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
         }),
-        Animated.timing(opacity, {
-          toValue: 1,
+        withTiming(1, {
           duration: 500,
           easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
         }),
-      ]),
+      ),
+      -1,
+      false,
     );
-    loop.start();
-    return () => loop.stop();
+
+    return () => {
+      cancelAnimation(opacity);
+    };
   }, [opacity]);
-  return opacity;
+
+  /* 冒号呼吸只改透明度，避免旧 Animated 在 Web 上每帧占用 JS。 */
+  return useAnimatedStyle(() => ({
+    opacity: opacity.value,
+  }));
 }
 
 export function PixelClock({ showSeconds = false, className }: PixelClockProps) {
   const { hh, mm, ss, showSeconds: withSeconds } = useNow(showSeconds);
-  const colonOpacity = useColonBreathe();
+  const colonAnimatedStyle = useColonBreathe();
 
   return (
     <View className={`flex-row items-center justify-center ${className ?? ''}`}>
       <Text className="font-pixel text-text text-7xl tracking-pixel">{hh}</Text>
 
       <Animated.View
-        style={{
-          width: 26,
-          height: 84,
-          marginHorizontal: 6,
-          alignItems: 'center',
-          justifyContent: 'center',
-          opacity: colonOpacity,
-        }}
+        style={[
+          {
+            width: 26,
+            height: 84,
+            marginHorizontal: 6,
+            alignItems: 'center',
+            justifyContent: 'center',
+          },
+          colonAnimatedStyle,
+        ]}
       >
         <View
           style={{

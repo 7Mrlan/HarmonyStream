@@ -20,16 +20,22 @@
     "@claudio/core": "workspace:*"
   },
   "peerDependencies": {
+    "@shopify/react-native-skia": "*",
     "react": "*",
+    "nativewind": "*",
     "react-native": "*",
-    "nativewind": "*"
+    "react-native-reanimated": "*",
+    "react-native-svg": "*"
   },
   "devDependencies": {
+    "@shopify/react-native-skia": "1.5.0",
     "@claudio/tsconfig": "workspace:*",
     "@types/react": "~18.3.0",
-    "react": "18.3.1",
     "react-native": "0.76.5",
     "nativewind": "^4.1.23",
+    "react": "18.3.1",
+    "react-native-reanimated": "~3.16.1",
+    "react-native-svg": "15.8.0",
     "typescript": "^5.4.5"
   }
 }

@@ -8,7 +8,16 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Pressable, Text, TextInput, View, type TextStyle, type ViewStyle } from 'react-native';
+import { Pressable, Text, TextInput, View, type LayoutChangeEvent, type TextStyle } from 'react-native';
+import Animated, {
+  Easing,
+  cancelAnimation,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+  type SharedValue,
+} from 'react-native-reanimated';
 
 export interface ChatInputProps {
   placeholder?: string;
@@ -20,50 +29,143 @@ export interface ChatInputProps {
 
 /* Hook：终端式光标 1Hz 闪烁 */
 function useCursor(active: boolean) {
-  const [on, setOn] = useState(true);
+  const pulse = useSharedValue(0);
+
   useEffect(() => {
+    cancelAnimation(pulse);
+
     if (!active) {
-      setOn(false);
-      return;
+      pulse.value = 0;
+      return undefined;
     }
-    const id = setInterval(() => setOn((v) => !v), 500);
-    return () => clearInterval(id);
-  }, [active]);
-  return on;
+
+    pulse.value = 0;
+    pulse.value = withRepeat(
+      withTiming(1, {
+        duration: 1000,
+        easing: Easing.linear,
+      }),
+      -1,
+      false,
+    );
+
+    return () => {
+      cancelAnimation(pulse);
+    };
+  }, [active, pulse]);
+
+  /* 光标只改 opacity，避免用 React state 做 1Hz 视觉闪烁。 */
+  return useAnimatedStyle(() => ({
+    opacity: active && pulse.value < 0.5 ? 1 : 0,
+  }));
 }
 
 /*
  * Hook：active 输入框像素光边
- *   - 使用 requestAnimationFrame 驱动，保证 Web / 移动端尽量 60fps 丝滑
+ *   - 使用 Reanimated 驱动，保证 Web / 移动端尽量 60fps 丝滑
  *   - phase 范围 0-1，表示光块在边框周长上的位置
  */
 function useBorderOrbit(active: boolean) {
-  const [phase, setPhase] = useState(0);
+  const phase = useSharedValue(0);
 
   useEffect(() => {
+    cancelAnimation(phase);
+
     if (!active) {
-      setPhase(0);
-      return;
+      phase.value = withTiming(0, { duration: 120, easing: Easing.out(Easing.quad) });
+      return undefined;
     }
 
-    let raf: number | null = null;
-    let start = 0;
-    const duration = 3200;
+    phase.value = 0;
+    phase.value = withRepeat(
+      withTiming(1, {
+        duration: 3200,
+        easing: Easing.linear,
+      }),
+      -1,
+      false,
+    );
 
-    const tick = (now: number) => {
-      if (!start) start = now;
-      const next = ((now - start) % duration) / duration;
-      setPhase(next);
-      raf = requestAnimationFrame(tick);
-    };
-
-    raf = requestAnimationFrame(tick);
     return () => {
-      if (raf !== null) cancelAnimationFrame(raf);
+      cancelAnimation(phase);
     };
-  }, [active]);
+  }, [active, phase]);
 
   return phase;
+}
+
+/* 工具：把 0-1 的相位映射到输入框边框上的坐标。 */
+function positionAtBorder(phase: number, width: number, height: number) {
+  'worklet';
+  const normalized = ((phase % 1) + 1) % 1;
+
+  if (normalized < 0.36) {
+    const local = normalized / 0.36;
+    return { x: local * width, y: -2 };
+  }
+  if (normalized < 0.5) {
+    const local = (normalized - 0.36) / 0.14;
+    return { x: width + 2, y: local * height };
+  }
+  if (normalized < 0.86) {
+    const local = (normalized - 0.5) / 0.36;
+    return { x: width - local * width, y: height + 2 };
+  }
+
+  const local = (normalized - 0.86) / 0.14;
+  return { x: -2, y: height - local * height };
+}
+
+function OrbitParticle({
+  index,
+  phase,
+  boxWidth,
+  boxHeight,
+  halo,
+}: {
+  index: number;
+  phase: SharedValue<number>;
+  boxWidth: SharedValue<number>;
+  boxHeight: SharedValue<number>;
+  halo?: boolean;
+}) {
+  const isHead = index === 0;
+  const size = halo
+    ? isHead ? 12 : Math.max(6, 10 - index * 0.26)
+    : isHead ? 5 : Math.max(2, 4.4 - index * 0.18);
+  const color = halo ? '#00ff88' : isHead ? '#c8ffde' : index < 5 ? '#64eaa7' : index < 11 ? '#1ecf82' : '#00a864';
+
+  const animatedStyle = useAnimatedStyle(() => {
+    const trailGap = 0.009;
+    const point = positionAtBorder(phase.value - index * trailGap, boxWidth.value, boxHeight.value);
+    const opacity = halo
+      ? isHead ? 0.1 : Math.max(0, 0.07 * Math.exp(-index * 0.24))
+      : isHead ? 0.72 : Math.max(0.04, 0.46 * Math.exp(-index * 0.2));
+
+    return {
+      opacity,
+      transform: [{ translateX: point.x - size / 2 }, { translateY: point.y - size / 2 }],
+    };
+  });
+
+  return (
+    <Animated.View
+      style={[
+        {
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          width: size,
+          height: size,
+          backgroundColor: color,
+          shadowColor: '#00ff88',
+          shadowOpacity: halo ? 0.32 : isHead ? 0.42 : 0.18,
+          shadowRadius: halo ? isHead ? 10 : 6 : isHead ? 8 : 4,
+        },
+        animatedStyle,
+      ]}
+    />
+  );
 }
 
 /*
@@ -73,85 +175,28 @@ function useBorderOrbit(active: boolean) {
  *   - 光点沿矩形周长连续移动，不做 12 段跳变
  *   - 后方跟随 10 个拖尾粒子，尺寸和透明度逐步衰减，形成梦幻绿光
  */
-function OrbitBorder({ active, phase }: { active: boolean; phase: number }) {
+function OrbitBorder({
+  active,
+  phase,
+  boxWidth,
+  boxHeight,
+}: {
+  active: boolean;
+  phase: SharedValue<number>;
+  boxWidth: SharedValue<number>;
+  boxHeight: SharedValue<number>;
+}) {
   if (!active) return null;
 
   const particles = Array.from({ length: 17 }, (_, i) => i);
 
-  function positionAt(p: number) {
-    const normalized = ((p % 1) + 1) % 1;
-
-    if (normalized < 0.36) {
-      const local = normalized / 0.36;
-      return { left: `${local * 100}%` as const, top: -2 };
-    }
-    if (normalized < 0.5) {
-      const local = (normalized - 0.36) / 0.14;
-      return { right: -2, top: `${local * 100}%` as const };
-    }
-    if (normalized < 0.86) {
-      const local = (normalized - 0.5) / 0.36;
-      return { right: `${local * 100}%` as const, bottom: -2 };
-    }
-
-    const local = (normalized - 0.86) / 0.14;
-    return { left: -2, bottom: `${local * 100}%` as const };
-  }
-
-  function particleStyle(i: number): ViewStyle {
-    const trailGap = 0.009;
-    const p = phase - i * trailGap;
-    const pos = positionAt(p);
-    const isHead = i === 0;
-    const size = isHead ? 5 : Math.max(2, 4.4 - i * 0.18);
-    const opacity = isHead ? 0.72 : Math.max(0.04, 0.46 * Math.exp(-i * 0.2));
-    const color = isHead ? '#c8ffde' : i < 5 ? '#64eaa7' : i < 11 ? '#1ecf82' : '#00a864';
-
-    return {
-      ...pos,
-      position: 'absolute' as const,
-      width: size,
-      height: size,
-      marginLeft: -size / 2,
-      marginTop: -size / 2,
-      backgroundColor: color,
-      opacity,
-      shadowColor: '#00ff88',
-      shadowOpacity: isHead ? 0.42 : 0.18,
-      shadowRadius: isHead ? 8 : 4,
-    };
-  }
-
-  function haloStyle(i: number): ViewStyle {
-    const trailGap = 0.009;
-    const p = phase - i * trailGap;
-    const pos = positionAt(p);
-    const isHead = i === 0;
-    const size = isHead ? 12 : Math.max(6, 10 - i * 0.26);
-    const opacity = isHead ? 0.1 : Math.max(0, 0.07 * Math.exp(-i * 0.24));
-
-    return {
-      ...pos,
-      position: 'absolute' as const,
-      width: size,
-      height: size,
-      marginLeft: -size / 2,
-      marginTop: -size / 2,
-      backgroundColor: '#00ff88',
-      opacity,
-      shadowColor: '#00ff88',
-      shadowOpacity: 0.32,
-      shadowRadius: isHead ? 10 : 6,
-    };
-  }
-
   return (
     <View pointerEvents="none" style={{ position: 'absolute', inset: 0 }}>
       {particles.map((i) => (
-        <View key={`halo-${i}`} style={haloStyle(i)} />
+        <OrbitParticle key={`halo-${i}`} index={i} phase={phase} boxWidth={boxWidth} boxHeight={boxHeight} halo />
       ))}
       {particles.map((i) => (
-        <View key={`dot-${i}`} style={particleStyle(i)} />
+        <OrbitParticle key={`dot-${i}`} index={i} phase={phase} boxWidth={boxWidth} boxHeight={boxHeight} />
       ))}
     </View>
   );
@@ -168,6 +213,8 @@ export function ChatInput({
   const [internal, setInternal] = useState('');
   const text = value !== undefined ? value : internal;
   const [focused, setFocused] = useState(false);
+  const inputBoxWidth = useSharedValue(0);
+  const inputBoxHeight = useSharedValue(0);
 
   /* 文本变更同时触发外部回调与内部状态 */
   function handleChange(t: string) {
@@ -185,18 +232,26 @@ export function ChatInput({
   }
 
   /* 终端光标：聚焦或有内容时不显示（让真实光标接管） */
-  const cursorOn = useCursor(!focused && !text);
+  const showIdleCursor = !focused && !text;
+  const cursorStyle = useCursor(showIdleCursor);
   /* 聚焦时才启用绿色像素光边 */
   const borderPhase = useBorderOrbit(focused);
+
+  /* 布局尺寸只写入 shared value，避免边框光效逐帧触发 React state。 */
+  function handleInputBoxLayout(event: LayoutChangeEvent) {
+    inputBoxWidth.value = event.nativeEvent.layout.width;
+    inputBoxHeight.value = event.nativeEvent.layout.height;
+  }
 
   return (
     <View className="flex-row items-center px-4 py-2 border-t border-line" style={{ gap: 8 }}>
       {/* 输入框：非聚焦普通暗边；聚焦时只有绿色光点和拖尾沿边框移动 */}
       <View
         className="flex-1 border border-line bg-panel px-3 py-2 flex-row items-center"
+        onLayout={handleInputBoxLayout}
         style={{ position: 'relative', overflow: 'visible' }}
       >
-        <OrbitBorder active={focused} phase={borderPhase} />
+        <OrbitBorder active={focused} phase={borderPhase} boxWidth={inputBoxWidth} boxHeight={inputBoxHeight} />
         {/* 左侧 ">" 提示符，与终端光标呼应 */}
         <Text className={`font-pixel text-base tracking-pixel mr-2 ${focused ? 'text-accent' : 'text-muted'}`}>{'>'}</Text>
         <TextInput
@@ -213,9 +268,12 @@ export function ChatInput({
           returnKeyType="send"
         />
         {/* 闪烁光标条，仅未聚焦无内容时显示 */}
-        {cursorOn ? (
-          <View
-            style={{ width: 8, height: 16, backgroundColor: '#6b7280', marginLeft: 4 }}
+        {showIdleCursor ? (
+          <Animated.View
+            style={[
+              { width: 8, height: 16, backgroundColor: '#6b7280', marginLeft: 4 },
+              cursorStyle,
+            ]}
           />
         ) : null}
       </View>

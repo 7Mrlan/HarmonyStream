@@ -156,3 +156,58 @@
 **规则**：凡是用户基于截图指出具体 UI 元素要删除或替换，完成前必须用 `rg` 反查可见文本、颜色值、组件调用和实际渲染路径；如果目标是 `packages/*` 组件，还要提醒 Metro / 浏览器缓存可能导致旧版仍显示。
 
 **关联文件**：`packages/ui/src/NowPlayingBar.tsx`、`packages/ui/src/MusicSpectrum.tsx`、`apps/mobile/app/index.tsx`
+
+---
+
+## 2026-05-22 - Reanimated 运行时报错不能只看 TypeScript / export
+
+**触发**：引入 Reanimated 后，终端 `tsc` 和 `expo export` 通过，但浏览器红屏报 `_reanimatedLoggerConfig is not defined`。
+
+**根因**：Reanimated 3 的 worklet/logger 需要 `react-native-reanimated/plugin` 做 Babel 转换；`nativewind/babel` 间接需要的 `react-native-worklets/plugin` 只解决 NativeWind/CSS interop 的插件解析问题，不能替代 Reanimated 3 自身的 Babel plugin。
+
+**规则**：1. 接入 `react-native-reanimated@3.x` 后，`apps/mobile/babel.config.js` 必须显式配置 `plugins: ['react-native-reanimated/plugin']`，并保持它在插件列表最后。2. 若 `nativewind/babel` 报找不到 `react-native-worklets/plugin`，同时保留 `react-native-worklets` 作为构建依赖，但不要误以为它替代了 Reanimated plugin。3. 这类运行时初始化问题必须让用户清 Metro 和浏览器缓存后再验收。
+
+**关联文件**：`apps/mobile/babel.config.js`、`apps/mobile/package.json`
+
+---
+
+## 2026-05-22 - 拖动型进度条不能让外部播放进度覆盖手势态
+
+**触发**：用户拖动播放进度条时，滑块会持续回到拖动开始前的播放位置，例如当前 1 分钟时拖动过程一直被拉回 1 分钟。
+**根因**：进度条是受控组件，外部播放器 `position` 会高频更新；如果同步 effect 在拖动期间继续把 `position` 写回本地动画值，就会和手势输入抢控制权。
+**规则**：1. 拖动开始后必须进入本地交互态，暂停外部 `position` 同步。2. 只在切歌/资源变化时重置进度，不要把 `position` 放进“切歌重置” effect 依赖。3. seek 提交后保留一个短暂 suppress 窗口，等待播放器状态追上新位置，避免提交后的第一帧又被旧 `position` 拉回。
+**关联文件**：`packages/ui/src/PlaybackProgressBar.tsx`
+
+---
+
+## 2026-05-22 - 长时间播放动画优先清理 JS 侧循环，而不是只看单帧是否流畅
+
+**触发**：动画刚启动很流畅，但运行几分钟后暂停按钮反馈变迟钝、整体 UI 变卡。
+**根因**：单帧看似只是在改 transform/opacity，但如果长期用 JS `requestAnimationFrame`、`Animated.Value`、大量 SVG/组件节点逐帧更新，JS 队列会积累压力；按钮点击、状态切换和手势事件也会被同一个 JS 线程拖慢。
+**规则**：1. 高频视觉效果优先使用 Reanimated/Skia/Canvas，把逐帧变化留在 UI/绘图层。2. Web fallback 不要用几十个 React/SVG 节点逐帧更新，能用单 canvas 就用单 canvas。3. 按钮呼吸、涟漪、按压缩放这类纯视觉动画不要用 React Native `Animated.Value` 的长循环，优先迁到 Reanimated。
+**关联文件**：`packages/ui/src/MusicSpectrum.tsx`、`packages/ui/src/PlayerControls.tsx`
+
+---
+
+## 2026-05-22 - 快速暂停/播放要防止重复 loop，也要防止昂贵重建
+
+**触发**：用户反馈连续点暂停、再开始、再切换时会超级卡，怀疑类似“定时器没关又开下一个”。
+**根因**：动画卡顿不只来自重复定时器。Reanimated/RAF 需要显式先 cancel 再启动；Skia/Canvas 这类重绘层即使没有重复 loop，如果暂停后立刻卸载、再播放时频繁重建 40+ 动画节点，也会造成明显点击卡顿。
+**规则**：1. 所有 `withRepeat`、`requestAnimationFrame`、`setTimeout` 都要在启动前或 cleanup 中有对应 cancel/clear。2. 快速切换播放状态时，不要立刻销毁昂贵绘制树，先视觉收尾，再给 800-1500ms idle 缓冲吸收连续点击。3. 排查“越点越卡”时同时检查重复 loop 和昂贵 mount/unmount 抖动。
+**关联文件**：`packages/ui/src/MusicSpectrum.tsx`、`packages/ui/src/PlayerControls.tsx`、`packages/ui/src/PlaybackProgressBar.tsx`
+
+---
+
+## 2026-05-22 - 用户明确说删除时不能只隐藏或断开调用
+**触发**：用户确认动画迁移时再次强调“全屏扫描线之前就说了要去掉，从代码里面删掉”，而此前方案只写了移除调用和导出、组件文件可以保留。
+**根因**：把“降低删除风险”和“满足明确删除意图”混在了一起；当用户要求的是移除某个 UI 元素本身时，保留源码文件会让后续误接回来的概率变高，也会让用户感觉需求没有被真正执行。
+**规则**：1. 用户明确说“删掉 / 从代码里面删掉 / 不要保留”时，必须同时处理渲染调用、公共导出和源文件本体。2. 如果 Spec 里原本写了“可保留文件”，需要先 Reverse Sync 修正 Spec/Todo，再改代码。3. 删除后必须用 `rg` 反查实际运行代码路径，确认没有残留组件引用。
+**关联文件**：`apps/mobile/app/index.tsx`、`packages/ui/src/index.ts`、`packages/ui/src/ScanlineOverlay.tsx`
+
+---
+
+## 2026-05-22 - Reanimated + Skia 是分层架构，不是所有 UI 强行同构
+**触发**：用户询问“现在项目所有的都是用 Reanimated + Skia 组合吗”，并要求把这个框架结构固化到后续框架设计。
+**根因**：动画优化容易被误解成“所有组件都必须同时使用两个库”。实际更稳的架构是职责分层：Reanimated 管交互和数值动画，Skia 管高密度绘制，普通 React Native 组件继续管布局和文本，Web 可以用单 canvas fallback。
+**规则**：1. 新增高频动画前先分类：交互/transform/opacity 用 Reanimated；频谱/粒子/尾焰/大量重复图形用 Skia；Web 若不用 Skia，必须用单 canvas fallback。2. React state 只承载业务状态和低频变化，不承载每帧动画值。3. 禁止新增 React Native `Animated.Value` 长循环和 `requestAnimationFrame + setState` 热路径。4. 低频业务计时器可以保留，但必须说明它不是高频视觉动画。
+**关联文件**：`tasks/spec.md`、`packages/ui/src/MusicSpectrum.tsx`、`packages/ui/src/PlaybackProgressBar.tsx`、`packages/ui/src/PlayerControls.tsx`

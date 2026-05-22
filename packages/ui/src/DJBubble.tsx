@@ -8,6 +8,15 @@
 
 import { useEffect, useState } from 'react';
 import { View, Text, Pressable } from 'react-native';
+import Animated, {
+  Easing,
+  cancelAnimation,
+  interpolate,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+} from 'react-native-reanimated';
 
 export interface DJBubbleProps {
   /* 主体文本，可多段落 */
@@ -50,16 +59,35 @@ function useTypewriter(text: string, typing: boolean, speedMs: number) {
 
 /* Hook：LIVE 红点 1Hz 闪烁 */
 function useLiveBlink(active: boolean) {
-  const [visible, setVisible] = useState(true);
+  const pulse = useSharedValue(0);
+
   useEffect(() => {
+    cancelAnimation(pulse);
+
     if (!active) {
-      setVisible(false);
-      return;
+      pulse.value = withTiming(0, { duration: 120, easing: Easing.out(Easing.quad) });
+      return undefined;
     }
-    const id = setInterval(() => setVisible((v) => !v), 500);
-    return () => clearInterval(id);
-  }, [active]);
-  return visible;
+
+    pulse.value = 0;
+    pulse.value = withRepeat(
+      withTiming(1, {
+        duration: 1000,
+        easing: Easing.linear,
+      }),
+      -1,
+      false,
+    );
+
+    return () => {
+      cancelAnimation(pulse);
+    };
+  }, [active, pulse]);
+
+  /* LIVE 红点只是视觉闪烁，交给 Reanimated，避免 setInterval 触发 React state。 */
+  return useAnimatedStyle(() => ({
+    opacity: active ? interpolate(pulse.value, [0, 0.5, 1], [1, 0.3, 1]) : 0.3,
+  }));
 }
 
 export function DJBubble({
@@ -73,7 +101,7 @@ export function DJBubble({
   onReplay,
 }: DJBubbleProps) {
   const display = useTypewriter(text, typing, typingSpeedMs);
-  const liveDot = useLiveBlink(live);
+  const liveDotStyle = useLiveBlink(live);
 
   return (
     <View className="flex-row px-4 py-3" style={{ gap: 12 }}>
@@ -94,13 +122,15 @@ export function DJBubble({
               style={{ borderColor: '#ff3355', gap: 4 }}
             >
               {/* 闪烁红点：广播中视觉信号 */}
-              <View
-                style={{
-                  width: 6,
-                  height: 6,
-                  backgroundColor: '#ff3355',
-                  opacity: liveDot ? 1 : 0.3,
-                }}
+              <Animated.View
+                style={[
+                  {
+                    width: 6,
+                    height: 6,
+                    backgroundColor: '#ff3355',
+                  },
+                  liveDotStyle,
+                ]}
               />
               <Text className="font-pixel text-xs tracking-pixel" style={{ color: '#ff3355' }}>
                 LIVE

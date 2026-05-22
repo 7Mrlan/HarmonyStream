@@ -1,27 +1,43 @@
 /*
  * 组件：MusicSpectrum
- * 作用：主屏实际显示的频谱条，完整替换为用户提供的 visualizer-container / v-bar / v-cap 实现。
- * 说明：按钮与播放功能不在这里改；active 只接入用户代码中的 isPlaying 判断位置。
+ * ------------------
+ * 作用：
+ *   - Native 端：使用 Skia 承接 48 根频谱柱与 LED cap 的高频绘制
+ *   - Web 端：保留无 CanvasKit 依赖的 Animated + SVG 降级实现
+ * 说明：
+ *   - 两条路径保持同一套 48 柱 / noise / wave / 中心衰减 / cap 下落参数
+ *   - Native 优先解决长期运行卡顿，Web 保持当前演示链路可用
  */
 
-import { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, View } from 'react-native';
-import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
+import { createElement, useEffect, useRef, useState } from 'react';
+import { Platform, View } from 'react-native';
+import {
+  Easing as ReanimatedEasing,
+  useDerivedValue,
+  useSharedValue,
+  withDelay,
+  withTiming,
+  type SharedValue,
+} from 'react-native-reanimated';
 
 export interface MusicSpectrumProps {
   /* 是否在播放：对应用户代码里的 isPlaying */
   active: boolean;
-  /* 音频可视化容器高度，默认完全使用用户代码 200px */
+  /* 是否已经播放结束，用于让动画回到刷新后的 idle 状态 */
+  ended?: boolean;
+  /* 音频可视化容器高度 */
   height?: number;
-  /* 容器宽度，未传时跟随父容器；用户代码原始宽度为 900px */
+  /* 容器宽度，未传时跟随父容器 */
   width?: number;
-  /* 主色，默认使用用户代码 var(--neon-green) 对应值 */
+  /* 主色，默认沿用当前霓虹绿 */
   color?: string;
-  /* 暗色，保留兼容旧 props，实际渐变按用户代码固定 */
+  /* 保留兼容旧 props */
   dimColor?: string;
-  /* 网格颜色，保留兼容旧 props，用户频谱不再绘制旧网格 */
+  /* 保留兼容旧 props */
   gridColor?: string;
 }
+
+type SkiaModule = typeof import('@shopify/react-native-skia');
 
 const BAR_COUNT = 48;
 const DEFAULT_WIDTH = 900;
@@ -30,108 +46,225 @@ const BAR_GAP = 6;
 const CAP_HEIGHT = 4;
 const CAP_TOP_OFFSET = 6;
 const CAP_FALL_SPEED = 0.8;
+const BAR_ATTACK_SPEED = 0.68;
+const BAR_DECAY_SPEED = 0.15;
+const BAR_IDLE_DECAY_SPEED = 0.45;
+const BAR_MIN_RISE_IMPULSE = 4.5;
+const NATIVE_CANVAS_IDLE_UNMOUNT_DELAY = 1200;
 
-export function MusicSpectrum({
+let cachedSkiaModule: SkiaModule | null | undefined;
+
+/* 工具：Native 端按需加载 Skia，避免 Web 演示链路硬依赖 CanvasKit。 */
+function getSkiaModule(): SkiaModule | null {
+  if (Platform.OS === 'web') {
+    return null;
+  }
+  if (cachedSkiaModule !== undefined) {
+    return cachedSkiaModule;
+  }
+  cachedSkiaModule = require('@shopify/react-native-skia') as SkiaModule;
+  return cachedSkiaModule;
+}
+
+/* 工具：worklet 内使用的 fract，供稳定噪声函数复用。 */
+function fract(value: number): number {
+  'worklet';
+  return value - Math.floor(value);
+}
+
+/* 工具：稳定伪噪声，避免每帧走 JS 随机数。 */
+function pseudoNoise(value: number): number {
+  'worklet';
+  return fract(Math.sin(value * 12.9898) * 43758.5453);
+}
+
+/* 工具：频谱柱上升要更果断，下降保留阻尼，避免变成生硬闪烁。 */
+function resolveBarLevel(current: number, target: number, active: boolean): number {
+  'worklet';
+  const diff = target - current;
+
+  if (diff <= 0) {
+    return current + diff * (active ? BAR_DECAY_SPEED : BAR_IDLE_DECAY_SPEED);
+  }
+
+  const easedRise = diff * BAR_ATTACK_SPEED;
+  const impulseRise = Math.min(diff, BAR_MIN_RISE_IMPULSE);
+  return current + Math.max(easedRise, impulseRise);
+}
+
+/* 子组件：单根 Skia 频谱柱，内部自持高度与 cap 状态，避免 React 重渲染。 */
+function NativeSpectrumBar({
+  skia,
+  index,
+  barWidth,
+  height,
+  color,
+  clock,
+  activeLevel,
+}: {
+  skia: SkiaModule;
+  index: number;
+  barWidth: number;
+  height: number;
+  color: string;
+  clock: SharedValue<number>;
+  activeLevel: SharedValue<number>;
+}) {
+  const { LinearGradient: SkiaLinearGradient, RoundedRect: SkiaRoundedRect, vec } = skia;
+  const entrance = useSharedValue(0);
+  const barLevel = useSharedValue(0);
+  const capLevel = useSharedValue(0);
+  const lastFrame = useSharedValue(0);
+
+  /* 入场节奏仍按原方案 stagger，避免生硬闪现。 */
+  useEffect(() => {
+    entrance.value = withDelay(
+      index * 20,
+      withTiming(1, {
+        duration: 1000,
+        easing: ReanimatedEasing.out(ReanimatedEasing.quad),
+      }),
+    );
+  }, [entrance, index]);
+
+  const barHeight = useDerivedValue(() => {
+    const now = clock.value;
+    const delta = lastFrame.value === 0 ? 16 : Math.max(16, Math.min(64, now - lastFrame.value));
+    lastFrame.value = now;
+
+    const wave = Math.sin(now * 0.005 + index * 0.2) * 20;
+    const noise = pseudoNoise(now * 0.002 + index * 3.17);
+    const centerDistance = Math.abs(index - BAR_COUNT / 2) / (BAR_COUNT / 2);
+    const activeTarget = 20 + noise * 70 + wave;
+    const idleTarget = 5;
+
+    let target = idleTarget + (activeTarget - idleTarget) * activeLevel.value;
+    target *= 1 - centerDistance * 0.6;
+
+    barLevel.value = resolveBarLevel(barLevel.value, target, activeLevel.value > 0.05);
+
+    if (barLevel.value > capLevel.value) {
+      capLevel.value = barLevel.value;
+    } else {
+      capLevel.value = Math.max(0, capLevel.value - CAP_FALL_SPEED * (delta / 16));
+    }
+
+    return Math.max(0, (barLevel.value / 100) * height * entrance.value);
+  });
+
+  const capHeightPx = useDerivedValue(() => Math.max(0, (capLevel.value / 100) * height * entrance.value));
+  const barY = useDerivedValue(() => height - barHeight.value);
+  const capY = useDerivedValue(() => height - capHeightPx.value - CAP_HEIGHT - CAP_TOP_OFFSET);
+  const capOpacity = useDerivedValue(() => (0.3 + activeLevel.value * 0.7) * entrance.value);
+  const x = index * (barWidth + BAR_GAP);
+
+  return (
+    <>
+      <SkiaRoundedRect x={x} y={barY} width={barWidth} height={barHeight} r={2}>
+        <SkiaLinearGradient
+          start={vec(x, height)}
+          end={vec(x, 0)}
+          colors={['#001a0f', '#006644', color]}
+        />
+      </SkiaRoundedRect>
+      <SkiaRoundedRect
+        x={x}
+        y={capY}
+        width={barWidth}
+        height={CAP_HEIGHT}
+        r={1}
+        color="#ffffff"
+        opacity={capOpacity}
+      />
+    </>
+  );
+}
+
+/* 子组件：Native 端真正挂载 Skia Canvas，父组件 idle 后会卸载它来停止时钟。 */
+function NativeSpectrumCanvas({
+  skia,
+  containerWidth,
+  height,
+  color,
+  activeLevel,
+}: {
+  skia: SkiaModule;
+  containerWidth: number;
+  height: number;
+  color: string;
+  activeLevel: SharedValue<number>;
+}) {
+  const { Canvas, useClock } = skia;
+  const clock = useClock();
+  const barWidth = Math.max(1, (containerWidth - (BAR_COUNT - 1) * BAR_GAP) / BAR_COUNT);
+
+  return (
+    <Canvas style={{ width: '100%', height }}>
+      {Array.from({ length: BAR_COUNT }, (_, index) => (
+        <NativeSpectrumBar
+          key={`native-spectrum-bar-${index}`}
+          skia={skia}
+          index={index}
+          barWidth={barWidth}
+          height={height}
+          color={color}
+          clock={clock}
+          activeLevel={activeLevel}
+        />
+      ))}
+    </Canvas>
+  );
+}
+
+function NativeMusicSpectrum({
   active,
   height = DEFAULT_HEIGHT,
   width,
   color = '#00ff9d',
 }: MusicSpectrumProps) {
-  /* 容器实际宽度：默认跟随当前系统父容器，但内部结构保持用户 visualizer-container */
+  const skia = getSkiaModule();
   const [containerWidth, setContainerWidth] = useState(width ?? DEFAULT_WIDTH);
-  /* 用户代码中的 frequencies 数组，用 ref 保持 RAF 内可变状态 */
-  const frequenciesRef = useRef<number[]>(new Array(BAR_COUNT).fill(0));
-  /* 用户代码中的 capPositions 数组，用 ref 保持 RAF 内可变状态 */
-  const capPositionsRef = useRef<number[]>(new Array(BAR_COUNT).fill(0));
-  /* requestAnimationFrame id，卸载时取消循环 */
-  const rafRef = useRef<number | null>(null);
-  /* 每根柱子的高度和 cap 位置用 Animated.Value 更新，避免每帧 React 重渲染。 */
-  const barHeightsRef = useRef(Array.from({ length: BAR_COUNT }, () => new Animated.Value(0)));
-  const capBottomsRef = useRef(Array.from({ length: BAR_COUNT }, () => new Animated.Value(0)));
-  /* 入场动画：对应用户代码 gsap.from(".v-bar-wrapper", { scaleY: 0, opacity: 0, stagger: 0.02 }) */
-  const entranceAnimationsRef = useRef(
-    Array.from({ length: BAR_COUNT }, () => ({
-      scaleY: new Animated.Value(0),
-      opacity: new Animated.Value(0),
-    })),
-  );
-  /* React Native 渲染帧：由 frequencies / capPositions 映射而来 */
+  const [renderCanvas, setRenderCanvas] = useState(active);
+  const activeLevel = useSharedValue(active ? 1 : 0);
+
+  /* 播放 / 暂停切换只改 activeLevel，Skia 节点在 UI 线程继续插值。 */
   useEffect(() => {
-    const animations = entranceAnimationsRef.current.map((item, i) => {
-      item.scaleY.setValue(0);
-      item.opacity.setValue(0);
-      return Animated.parallel([
-        Animated.timing(item.scaleY, {
-          toValue: 1,
-          duration: 1000,
-          delay: i * 20,
-          easing: Easing.out(Easing.quad),
-          useNativeDriver: true,
-        }),
-        Animated.timing(item.opacity, {
-          toValue: 1,
-          duration: 1000,
-          delay: i * 20,
-          easing: Easing.out(Easing.quad),
-          useNativeDriver: true,
-        }),
-      ]);
-    });
-    Animated.parallel(animations).start();
-  }, []);
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
-  useEffect(() => {
-    function updateVisualizer() {
-      const frequencies = frequenciesRef.current;
-      const capPositions = capPositionsRef.current;
-
-      frequencies.forEach((frequency, i) => {
-        let target: number;
-
-        if (active) {
-          const noise = Math.random();
-          const wave = Math.sin(Date.now() * 0.005 + i * 0.2) * 20;
-          target = 20 + noise * 70 + wave;
-          const distFromCenter = Math.abs(i - BAR_COUNT / 2) / (BAR_COUNT / 2);
-          target *= 1 - distFromCenter * 0.6;
-        } else {
-          target = 5;
-        }
-
-        const diff = target - frequency;
-        if (diff > 0) {
-          frequencies[i] = frequency + diff * 0.3;
-        } else {
-          frequencies[i] = frequency + diff * 0.15;
-        }
-
-        const nextFrequency = frequencies[i] ?? 0;
-        if (nextFrequency > (capPositions[i] ?? 0)) {
-          capPositions[i] = nextFrequency;
-        } else {
-          capPositions[i] = (capPositions[i] ?? 0) - CAP_FALL_SPEED;
-        }
-        if ((capPositions[i] ?? 0) < 0) capPositions[i] = 0;
-
-        barHeightsRef.current[i]?.setValue(Math.max(0, (nextFrequency / 100) * height));
-        capBottomsRef.current[i]?.setValue(Math.max(0, ((capPositions[i] ?? 0) / 100) * height));
+    if (active) {
+      setRenderCanvas(true);
+      activeLevel.value = withTiming(1, {
+        duration: 120,
+        easing: ReanimatedEasing.out(ReanimatedEasing.quad),
       });
-
-      rafRef.current = requestAnimationFrame(updateVisualizer);
+      return undefined;
     }
 
-    rafRef.current = requestAnimationFrame(updateVisualizer);
-    return () => {
-      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
-    };
-  }, [active, height]);
+    activeLevel.value = withTiming(0, {
+      duration: 140,
+      easing: ReanimatedEasing.out(ReanimatedEasing.quad),
+    });
+    /*
+     * 暂停后视觉先快速落下，但不要立刻卸载 Skia Canvas。
+     * 这样可以吸收用户快速暂停/播放的连续点击，避免反复重建 48 根 Skia 节点造成卡顿。
+     */
+    timer = setTimeout(() => setRenderCanvas(false), NATIVE_CANVAS_IDLE_UNMOUNT_DELAY);
 
-  const barWidth = Math.max(1, (containerWidth - (BAR_COUNT - 1) * BAR_GAP) / BAR_COUNT);
+    return () => {
+      if (timer) {
+        clearTimeout(timer);
+      }
+    };
+  }, [active, activeLevel]);
+
+  if (!skia) {
+    return null;
+  }
 
   return (
     <View
-      onLayout={(e) => {
-        const measuredWidth = e.nativeEvent.layout.width;
+      onLayout={(event) => {
+        const measuredWidth = event.nativeEvent.layout.width;
         if (!width && measuredWidth && Math.abs(measuredWidth - containerWidth) > 0.5) {
           setContainerWidth(measuredWidth);
         }
@@ -139,78 +272,170 @@ export function MusicSpectrum({
       style={{
         width: width ?? '100%',
         height,
-        flexDirection: 'row',
-        alignItems: 'flex-end',
-        justifyContent: 'center',
+      }}
+    >
+      {renderCanvas ? (
+        <NativeSpectrumCanvas
+          skia={skia}
+          containerWidth={containerWidth}
+          height={height}
+          color={color}
+          activeLevel={activeLevel}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+/* 子组件：Web 端降级频谱，沿用现有 Animated + SVG 路径，避免 CanvasKit 依赖。 */
+function WebMusicSpectrum({
+  active,
+  height = DEFAULT_HEIGHT,
+  width,
+  color = '#00ff9d',
+}: MusicSpectrumProps) {
+  const [containerWidth, setContainerWidth] = useState(width ?? DEFAULT_WIDTH);
+  const frequenciesRef = useRef<number[]>(new Array(BAR_COUNT).fill(0));
+  const capPositionsRef = useRef<number[]>(new Array(BAR_COUNT).fill(0));
+  const rafRef = useRef<number | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const entranceStartRef = useRef<number | null>(null);
+
+  /* Web 降级使用单 canvas 绘制，避免 48 个 Animated/SVG 节点长期占用 JS。 */
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const maybeContext = canvas?.getContext('2d');
+    if (!canvas || !maybeContext || containerWidth <= 0 || height <= 0) {
+      return undefined;
+    }
+
+    const context = maybeContext;
+    const dpr = window.devicePixelRatio || 1;
+    const pixelWidth = Math.max(1, Math.floor(containerWidth * dpr));
+    const pixelHeight = Math.max(1, Math.floor(height * dpr));
+    canvas.width = pixelWidth;
+    canvas.height = pixelHeight;
+    canvas.style.width = '100%';
+    canvas.style.height = `${height}px`;
+    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (active) {
+      frequenciesRef.current.fill(0);
+      capPositionsRef.current.fill(0);
+      entranceStartRef.current = null;
+    }
+
+    function updateVisualizer() {
+      const frequencies = frequenciesRef.current;
+      const capPositions = capPositionsRef.current;
+      const now = Date.now();
+      const start = entranceStartRef.current ?? now;
+      entranceStartRef.current = start;
+      const barWidth = Math.max(1, (containerWidth - (BAR_COUNT - 1) * BAR_GAP) / BAR_COUNT);
+      let maxMovingValue = 0;
+
+      context.clearRect(0, 0, containerWidth, height);
+
+      frequencies.forEach((frequency, index) => {
+        let target: number;
+
+        if (active) {
+          const noise = Math.random();
+          const wave = Math.sin(now * 0.005 + index * 0.2) * 20;
+          target = 20 + noise * 70 + wave;
+          const centerDistance = Math.abs(index - BAR_COUNT / 2) / (BAR_COUNT / 2);
+          target *= 1 - centerDistance * 0.6;
+        } else {
+          target = 0;
+        }
+
+        frequencies[index] = resolveBarLevel(frequency, target, active);
+
+        const nextFrequency = frequencies[index] ?? 0;
+        if (nextFrequency > (capPositions[index] ?? 0)) {
+          capPositions[index] = nextFrequency;
+        } else {
+          capPositions[index] = (capPositions[index] ?? 0) - CAP_FALL_SPEED * (active ? 1 : 4);
+        }
+        if ((capPositions[index] ?? 0) < 0) {
+          capPositions[index] = 0;
+        }
+
+        const entranceProgress = Math.max(0, Math.min(1, (now - start - index * 20) / 1000));
+        const easedEntrance = 1 - Math.pow(1 - entranceProgress, 2);
+        const barHeight = Math.max(0, (nextFrequency / 100) * height * easedEntrance);
+        const capBottom = Math.max(0, ((capPositions[index] ?? 0) / 100) * height * easedEntrance);
+        const x = index * (barWidth + BAR_GAP);
+        const y = height - barHeight;
+
+        const gradient = context.createLinearGradient(0, height, 0, 0);
+        gradient.addColorStop(0, '#001a0f');
+        gradient.addColorStop(0.4, '#006644');
+        gradient.addColorStop(1, color);
+        context.fillStyle = gradient;
+        context.fillRect(x, y, barWidth, barHeight);
+
+        context.globalAlpha = active ? 1 : 0.3;
+        context.fillStyle = '#ffffff';
+        context.fillRect(x, height - capBottom - CAP_HEIGHT - CAP_TOP_OFFSET, barWidth, CAP_HEIGHT);
+        context.globalAlpha = 1;
+
+        maxMovingValue = Math.max(maxMovingValue, nextFrequency, capPositions[index] ?? 0);
+      });
+
+      if (active || maxMovingValue > 1) {
+        rafRef.current = requestAnimationFrame(updateVisualizer);
+      } else {
+        context.clearRect(0, 0, containerWidth, height);
+        frequenciesRef.current.fill(0);
+        capPositionsRef.current.fill(0);
+        entranceStartRef.current = null;
+        rafRef.current = null;
+      }
+    }
+
+    if (rafRef.current != null) {
+      cancelAnimationFrame(rafRef.current);
+    }
+    rafRef.current = requestAnimationFrame(updateVisualizer);
+    return () => {
+      if (rafRef.current != null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    };
+  }, [active, color, containerWidth, height]);
+
+  return (
+    <View
+      onLayout={(event) => {
+        const measuredWidth = event.nativeEvent.layout.width;
+        if (!width && measuredWidth && Math.abs(measuredWidth - containerWidth) > 0.5) {
+          setContainerWidth(measuredWidth);
+        }
+      }}
+      style={{
+        width: width ?? '100%',
+        height,
         gap: BAR_GAP,
         zIndex: 5,
       }}
     >
-      {Array.from({ length: BAR_COUNT }, (_, i) => {
-        const barHeight = barHeightsRef.current[i] ?? 0;
-        const capBottom = capBottomsRef.current[i] ?? 0;
-        const gradientId = `music-spectrum-v-bar-${i}`;
-        const entrance = entranceAnimationsRef.current[i];
-
-        return (
-          <Animated.View
-            key={i}
-            style={{
-              width: barWidth,
-              height: '100%',
-              flexDirection: 'column',
-              justifyContent: 'flex-end',
-              position: 'relative',
-              opacity: entrance?.opacity ?? 1,
-              transform: [{ scaleY: entrance?.scaleY ?? 1 }],
-            }}
-          >
-            <Animated.View
-              style={{
-                position: 'absolute',
-                bottom: capBottom,
-                left: 0,
-                width: '100%',
-                height: CAP_HEIGHT,
-                backgroundColor: '#ffffff',
-                borderRadius: 1,
-                opacity: active ? 1 : 0.3,
-                zIndex: 6,
-                shadowColor: '#ffffff',
-                shadowOpacity: active ? 1 : 0.4,
-                shadowRadius: active ? 12 : 4,
-                transform: [{ translateY: -CAP_TOP_OFFSET }],
-              }}
-            />
-            <Animated.View
-              style={{
-                width: barWidth,
-                height: barHeight,
-                overflow: 'hidden',
-                shadowColor: color,
-                shadowOpacity: 0.2,
-                shadowRadius: 15,
-              }}
-            >
-              <Svg
-                width={barWidth}
-                height="100%"
-                viewBox={`0 0 ${barWidth} ${height}`}
-                preserveAspectRatio="none"
-              >
-                <Defs>
-                  <LinearGradient id={gradientId} x1="0" y1="1" x2="0" y2="0">
-                    <Stop offset="0" stopColor="#001a0f" />
-                    <Stop offset="0.4" stopColor="#006644" />
-                    <Stop offset="1" stopColor={color} />
-                  </LinearGradient>
-                </Defs>
-                <Rect width={barWidth} height={height} rx={2} fill={`url(#${gradientId})`} />
-              </Svg>
-            </Animated.View>
-          </Animated.View>
-        );
+      {createElement('canvas', {
+        ref: canvasRef,
+        style: {
+          display: 'block',
+          width: '100%',
+          height,
+        },
       })}
     </View>
   );
+}
+
+export function MusicSpectrum(props: MusicSpectrumProps) {
+  if (Platform.OS === 'web') {
+    return <WebMusicSpectrum {...props} />;
+  }
+
+  return <NativeMusicSpectrum {...props} />;
 }

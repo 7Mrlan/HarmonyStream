@@ -320,6 +320,26 @@ ESLint `no-restricted-imports` 强制约束反向依赖。
 - Reanimated worklets UI thread 说明：`https://docs.swmansion.com/react-native-reanimated/docs/guides/worklets/`
 - Gesture Handler 与 Reanimated 集成说明：`https://docs.swmansion.com/react-native-gesture-handler/docs/fundamentals/reanimated-interactions/`
 
+### 4. 稳定性执行标准（已补充）
+
+- 项目优先级：移动端是最终目标，浏览器只是当前演示环境。因此架构优先服务 Android / Expo Go / 后续 dev-client 的长期流畅；Web 端必须可演示，但不能反过来限制移动端的高性能路径。
+- 稳定性定义：不承诺物理意义上的“永远 60fps”，因为设备发热、系统降频、后台任务和浏览器节流不可控；但代码必须做到没有会随运行时间累积恶化的结构性问题，包括未清理 RAF、每帧 React state、无界数组增长、每帧新建大量对象、每帧 seek、重复启动动画 loop。
+- 热路径准入：所有 30fps/60fps 高频动画不得依赖 React state 驱动。允许的路径只有 Reanimated shared value / worklet、Skia Canvas draw loop、原生 Animated transform/opacity、或浏览器端 compositor/canvas。
+- 拖动准入：手指移动到视觉响应之间不能依赖播放器 seek 完成。拖动视觉必须本地即时更新；播放器只接收最终位置或节流位置。拖动取消、拖动结束、切歌、暂停必须都有明确状态重置。
+- 绘制准入：频谱、粒子、尾焰这类高频视觉不得用 40+ 个 React/SVG 节点逐帧更新。优先单 Canvas 绘制，状态保存在固定长度 typed array 或对象池中，避免每帧创建新数组。
+- 生命周期准入：所有动画必须有 mount/unmount 清理；播放暂停、页面离开、切歌都要停止或冻结不必要的循环。
+- 验证准入：完成后必须跑 TypeScript；必须通过代码搜索确认高频组件没有 `requestAnimationFrame + setState` 热路径；必须在浏览器演示环境运行观察拖动响应；移动端验证步骤单独列出，用户目标设备长测作为最终稳定性确认。
+- fallback 准入：如果 Reanimated + Skia 接入后仍不能满足长期流畅，下一层方案是把主视觉整合为单一 Canvas 场景，并进一步减少 React Native 组件参与动画；不接受通过减少视觉复杂度或删除效果来假装优化。
+
+### 5. 上下文交接锁定版（已确认执行）
+
+- 用户已明确确认执行本次架构升级，但计划切换到新上下文继续；新上下文应按本 Spec 执行，不重新发散方案。
+- 当前 Git 基线已由用户提交，提交为 `07fbdd7 第一版`；执行前先确认 `git status --short`，不要覆盖用户未提交改动。
+- 执行主线：安装 Expo SDK 52 兼容版本 `react-native-reanimated` 与 `@shopify/react-native-skia`；配置 Babel；把进度条从 `NowPlayingBar` 中抽出，放到 `MusicSpectrum` 与 `PlayerControls` 之间；用 Reanimated + Gesture Handler 重写进度条拖动；用 Skia/Canvas 承接频谱、粒子、尾焰等高频绘制。
+- 性能目标：移动端优先，浏览器当前用于演示；代码层消灭随时间恶化的热路径，包括每帧 React state、未清理 RAF、无界数组增长、每帧大量对象分配、每帧播放器 seek。
+- 视觉目标：保留当前赛博像素电台风格，不通过减少频谱柱、删除粒子、降低动画复杂度来换性能。
+- 验证目标：TypeScript 必须通过；代码搜索确认高频组件没有 `requestAnimationFrame + setState` 热路径；浏览器演示拖动进度条必须跟手；移动端验证步骤需明确标注执行载体。
+
 ---
 
 ## 2026-05-22 NowPlayingBar 进度条功能修正 Spec
@@ -346,3 +366,169 @@ ESLint `no-restricted-imports` 强制约束反向依赖。
 - 当前项目没有 `react-native-reanimated` 或 `@shopify/react-native-skia`，本轮不新增原生依赖，先用现有 `react-native-svg` 与 React Native `Animated` 做低风险优化。
 - 本轮优化不降低动画复杂度、不减少柱子数量、不移除粒子和尾焰；只减少每帧对象分配和 React 组件重渲染。
 - 若后续仍需要更强性能，再单独评估引入 Skia 或 Reanimated，并配套 Expo/Android 原生验证。
+
+---
+
+## 2026-05-22 动画生命周期与按钮反馈优化 Spec
+
+### 1. 现状分析（已确认）
+
+- `apps/mobile/app/_hooks/useRadioPlayer.ts` / `useRadioPlayer`：当前只向 UI 暴露 `playing`、`position`、`duration`、`buffering`，没有显式暴露 `ended`。但 `expo-audio` 的 `AudioStatus` 已提供 `didJustFinish`，可以作为歌曲播完后的权威结束信号。
+- `apps/mobile/app/index.tsx` / `HomeScreen`：当前 `MusicSpectrum`、`PlaybackProgressBar`、`PlayerControls` 只消费 `radio.playing`。暂停和播完都会表现为非播放态，但 UI 无法区分“普通暂停”和“歌曲已经结束”，也无法统一进入刷新后的 idle 视觉态。
+- `packages/ui/src/MusicSpectrum.tsx` / `MusicSpectrum`：Native 路径已使用 Skia，Web 路径已使用单 canvas；但暂停时仍会做一段低位收尾，结束态没有明确重置入场时间和频谱数组。用户希望暂停/播完时快速下落并停止，重新播放时像刷新后一样重新启动。
+- `packages/ui/src/PlaybackProgressBar.tsx` / `PlaybackProgressBar`：拖动和视觉动画已使用 Reanimated，但 `flowClock` 和 `flamePulse` 在组件挂载期间持续循环，暂停后只是降低可见度，不是真正停止循环。
+- `packages/ui/src/PlayerControls.tsx` / `GlassButton`：按钮反馈已迁移到 Reanimated，但涟漪在 `onPress` 才启动，按压反馈持续时间偏保守，导致用户感觉“点击手感不够迅速”。
+- `packages/ui/src/MusicSpectrum.tsx` / `BAR_COUNT`：当前 48 根频谱柱在 Web 已是单 canvas 绘制，在 Native 已是 Skia 绘制。减少到 24 根会降低绘制量，但不是当前卡顿的第一根因；优先级低于动画生命周期停机。
+
+### 2. 功能点与改造边界（已确认）
+
+- `useRadioPlayer` 增加 `ended`：优先使用 `status.didJustFinish`，并用接近总时长且非播放的状态作为兜底，供 UI 进入结束态。
+- 播放控制行为：如果已经 `ended`，用户点击播放应先 seek 到 0，再开始播放，避免停在末尾时播放按钮无反馈或状态异常。
+- `HomeScreen` 增加统一 `animationActive = radio.playing && !radio.ended`，并传给 `MusicSpectrum`、`PlaybackProgressBar`、`PlayerControls`；进度仍然使用真实 `position / duration`，不伪造播放状态。
+- `MusicSpectrum` 增加结束/暂停生命周期：active 变 false 时快速下落到 0 附近并停止；active 再变 true 时重置入场时间，让动画像刷新后第一次播放一样重新进入。
+- `PlaybackProgressBar` 增加动画运行开关：播放或拖动时才启动粒子和尾焰循环；暂停/结束后快速淡出并 cancel `withRepeat`，避免 idle 期间空转。
+- `PlayerControls` 优化触感：`onPressIn` 立即启动涟漪和快速缩放，缩短反馈动画时长；业务回调仍放在 `onPress`，避免误触发播放控制。
+- 不减少 48 根频谱柱作为本轮默认改动；只有后续低端设备实测仍明显掉帧，才评估 `barCount` 响应式降级。
+- 不改无关动画组件：`PixelClock`、`OnAirIndicator`、`ScanlineOverlay`、`PixelPetSwitcher`、`ChatInput` 不在本轮改造范围，避免把播放器生命周期优化扩散成全站动画重构。
+
+### 3. 风险与决策（已确认）
+
+- 决策 1：本轮优先“停掉不该运行的动画”，而不是“降低视觉复杂度”。这与新架构正向一致，因为新架构的目标是高频动画不占 JS 且 idle 不空转。
+- 决策 2：保留 48 根频谱柱。当前瓶颈更可能来自生命周期和残留循环，贸然减到 24 根会改变视觉密度，但收益不一定明显。
+- 决策 3：结束态由播放器状态驱动，不由 UI 组件自行猜测歌曲是否结束。组件只消费 `active` / `ended` 语义，业务状态来源仍集中在 `useRadioPlayer`。
+- 决策 4：快速反馈只影响视觉，不提前触发业务回调。`onPressIn` 只做视觉反馈，`onPress` 才执行播放/暂停。
+- 验收标准：TypeScript 通过；Web/Android export 通过；`PlaybackProgressBar` 不再在 idle 状态持续 `withRepeat`；Web 频谱 active=false 后会停止 RAF；按钮按下反馈在按下瞬间启动。
+- HARD-GATE：用户已在 2026-05-22 明确确认“按你的方案优化”，允许开始编码。
+
+---
+
+## 2026-05-22 Trace 驱动的残留动画迁移 Spec
+
+### 1. 现状分析（已确认）
+
+- `apps/recrod/Trace-20260522T135839.json/Trace-20260522T135839.json`：Chrome Performance trace 录制约 68 秒。主线程 `>=50ms` 长任务只有 6 个，且集中在 DevTools profiling 自身，不像业务代码产生单个长阻塞。
+- trace / `FunctionCall`：`react-native-web` 的 `TimingAnimation.onUpdate` 总耗时约 3802ms / 5250 次，`SpringAnimation.onUpdate` 总耗时约 313ms / 177 次，说明首屏仍存在旧 React Native `Animated` 每帧 JS 更新。
+- trace / `MusicSpectrum.tsx` / `updateVisualizer`：总耗时约 102ms / 608 次，不是本轮主瓶颈，保留 48 根频谱柱。
+- trace / `ChatInput.tsx` / `tick`：仍存在 `requestAnimationFrame` 驱动的输入框边框光效。
+- `apps/mobile/app/index.tsx` / `HomeScreen`：全屏 `ScanlineOverlay` 仍在渲染；用户已确认此前就要求去掉，本轮从调用链和导出中移除。
+- `packages/ui/src/PixelClock.tsx` / `useColonBreathe`：仍使用 React Native `Animated.loop`。
+- `packages/ui/src/OnAirIndicator.tsx` / `useBreathe`、`usePulseRing`：仍使用 `setInterval` 和 React Native `Animated` 递归 loop。
+- `packages/ui/src/PixelPetSwitcher.tsx`：宠物漂浮、旋转、点击动作、特效粒子、气泡显隐等仍使用 React Native `Animated`。
+- `packages/ui/src/DJBubble.tsx` / `useLiveBlink`：LIVE 红点仍使用 `setInterval` 切 state。
+
+### 2. 功能点与边界（已确认）
+
+- 删除 `ScanlineOverlay`：从 `HomeScreen` 调用、`packages/ui/src/index.ts` 导出和 `packages/ui/src/ScanlineOverlay.tsx` 源码文件中移除，满足用户“从代码里面删掉”的要求。
+- 迁移 `PixelClock`：冒号呼吸改为 Reanimated `withRepeat`，不再使用 React Native `Animated`。
+- 迁移 `OnAirIndicator`：红点呼吸和扩散环改为 Reanimated，取消 `setInterval` 和递归 `Animated.timing`。
+- 迁移 `ChatInput`：边框光点从 `requestAnimationFrame + setState` 改为 Reanimated shared value；未聚焦时停止循环。
+- 迁移 `DJBubble`：LIVE 红点从 `setInterval` 切 state 改为 Reanimated opacity。
+- 迁移 `PixelPetSwitcher`：将持续循环的漂浮/旋转和交互特效从 React Native `Animated` 迁到 Reanimated；保留必要的业务 `setTimeout` 和低频帧切换。
+- 不改频谱柱数量、不重做播放器核心结构、不改视觉主题。
+
+### 3. 风险与决策（已确认）
+
+- 决策 1：本轮优先清理 trace 证明的旧 JS 动画，而不是继续优化频谱。
+- 决策 2：移除扫描线是用户明确要求，且它是全屏常驻动画，删除属于正向性能优化。
+- 决策 3：对复杂宠物组件采用“替换动画载体、保留 DOM/布局/行为”的迁移方式，避免重写宠物业务逻辑。
+- 验收标准：TypeScript 通过；Web/Android export 通过；`rg` 复核首屏目标文件不再包含 React Native `Animated`、`requestAnimationFrame` 动画热路径；保留的 `setInterval` 只能是低频时间/文字/宠物帧业务，不是视觉动画 RAF/Animated 热路径。
+- HARD-GATE：用户已在 2026-05-22 明确确认“全屏扫描线删掉，其余动画完成迁移”，允许开始编码。
+
+---
+
+## 2026-05-22 动画框架设计准入规范（已确认）
+
+### 1. 当前结论
+
+- 不是所有 UI 都必须同时使用 Reanimated + Skia；正确架构是按职责分层。
+- Reanimated 是默认动画状态层：用于手势、按压反馈、transform、opacity、短促粒子、循环呼吸、拖动进度、动画生命周期开关。
+- Skia 是默认高频绘制层：用于频谱、密集粒子、尾焰、大量重复图形、需要 30fps/60fps 连续重绘且节点数量较多的画面。
+- React Native 组件仍负责普通布局、文本、按钮结构和可访问交互，不把所有 UI 塞进 Canvas。
+- Web 端允许使用单 HTML canvas fallback；前提是不能退回 40+ React/SVG 节点逐帧更新，也不能使用 `requestAnimationFrame + setState` 热路径。
+- 低频业务计时器允许保留，例如时钟文字每秒更新、日期每 30 秒更新、打字机文本、宠物 idle 帧切换；它们不属于高频视觉动画热路径。
+
+### 2. 默认选型规则
+
+- 交互动画默认 Reanimated：`withTiming`、`withSpring`、`withRepeat`、`useSharedValue`、`useAnimatedStyle`，启动前先 `cancelAnimation`，unmount 时必须 cleanup。
+- 高频绘制默认 Skia：如果一个视觉效果包含大量相似元素、粒子、频谱柱或需要每帧绘制，优先使用 Skia Canvas；Native 端不再使用大量 SVG/React 子节点逐帧更新。
+- Web fallback 默认单 canvas：如果 Skia Web 的 CanvasKit 增加开发或加载成本，Web 可以走平台 canvas，但必须具备启动前 cancel、inactive 后停止、数组复用和清空逻辑。
+- React state 只能承载业务状态：播放状态、当前曲目、文本内容、低频帧状态可以进 React state；每帧变化的数值不能进 React state。
+- 视觉复杂度不靠删除效果换性能：不能默认通过减少频谱柱、删粒子、降动画复杂度解决卡顿；先迁移动画载体和生命周期。
+
+### 3. 新动画准入清单
+
+- 新增 30fps/60fps 动画时，必须说明它属于 Reanimated、Skia、Web canvas fallback 中的哪一类。
+- 不允许新增 React Native `Animated.Value` 长循环。
+- 不允许新增 `requestAnimationFrame + setState` 动画热路径。
+- 不允许在拖动过程中每个 move 都调用播放器 `seek`；拖动视觉先本地响应，业务提交放到结束或节流点。
+- 不允许 idle 状态空转动画；暂停、结束、切歌、页面离开都必须有停止或快速收尾策略。
+- 验证必须包含 `rg` 热点扫描、TypeScript、Expo export；涉及 `packages/*` 源码后，验收时提醒清 Metro 和浏览器缓存。
+
+### 4. 当前项目状态
+
+- `MusicSpectrum`：Native 使用 Skia + Reanimated shared value；Web 使用单 canvas fallback。
+- `PlaybackProgressBar`、`PlayerControls`、`PixelClock`、`OnAirIndicator`、`ChatInput`、`DJBubble`、`PixelPetSwitcher`：视觉动画已迁移到 Reanimated。
+- `ScanlineOverlay`：已从调用、导出和源码中删除。
+- 当前保留的 `setInterval` / `setTimeout` 只允许是低频业务状态或短生命周期收尾，不作为高频视觉动画方案。
+
+---
+
+## 2026-05-22 后续优化路线 Spec（规划中）
+
+### 1. 当前基线
+
+- `packages/ui/src/MusicSpectrum.tsx` / `MusicSpectrum`：Native 路径使用 Skia + Reanimated shared value，Web 路径使用单 canvas fallback；频谱现在是伪音频律动，不读取真实音乐能量。
+- `packages/ui/src/PlaybackProgressBar.tsx` / `PlaybackProgressBar`：拖动、粒子、尾焰、飞船反馈已迁移到 Reanimated；视觉宽度已跟上方频谱和下方控制条对齐。
+- `packages/ui/src/PlayerControls.tsx` / `GlassButton`：按钮按压、涟漪、呼吸反馈已迁移到 Reanimated，仍需要真机 release 包验证触感。
+- `apps/mobile/app/_hooks/useRadioPlayer.ts` / `useRadioPlayer`：真实播放、暂停、seek、ended 状态已接入 UI；下一阶段需要验证 APK release 下后台、锁屏、切歌和异常网络场景。
+- `rg` 当前结果：目标 UI 动画组件不再包含旧 RN `Animated.Value` 长循环；`MusicSpectrum` Web fallback 保留单 canvas `requestAnimationFrame`，这是当前唯一高频 RAF，但不走 React state。
+
+### 2. 路线分阶段
+
+#### Phase 1：真机 release 验收闭环
+
+- 目标：确认浏览器里的丝滑效果在 APK release 包里是否成立。
+- 范围：不新增功能，专注性能验证、卡顿复现、缓存与构建链路确认。
+- 验收动作：播放 10-15 分钟；连续暂停/播放 20 次；拖动进度条 10 次；切歌 10 次；切后台再回来；观察频谱、按钮、进度条是否迟钝或重复开 loop。
+- 产出：记录机型、构建类型、是否发热、是否省电模式、是否 release 包；如果掉帧，再用 trace 或 profiler 定位，不凭体感猜。
+
+#### Phase 2：视觉手感细调
+
+- 目标：把“看起来快”和“摸起来快”调到稳定风格。
+- 范围：`MusicSpectrum` 的 attack/decay 参数、`PlaybackProgressBar` 高度/飞船比例、`PlayerControls` 按压时长与涟漪强度。
+- 原则：只改参数和局部样式，不改架构，不减少 48 根频谱柱，不删除粒子效果。
+- 验收：浏览器和 APK 同一套体验词汇，例如“弹起果断、落下干净、按钮即按即响、拖动不回弹”。
+
+#### Phase 3：真实音频驱动频谱调研与方案选择
+
+- 目标：让频谱从“伪音乐律动”升级到“跟真实音乐能量变化律动”。
+- 选项 A：运行时音频分析。优点是最真实；风险是 Expo/Native 音频数据访问、性能、Android 兼容性需要调研。
+- 选项 B：预分析 waveform/beat JSON。优点是 APK 运行时成本低、跨平台稳定；风险是需要建立歌曲分析与缓存流程。
+- 选项 C：继续伪律动但接入歌曲元数据节奏预设。优点是快；缺点是不是真正跟音乐。
+- 推荐：先调研 A 是否可行；如果 Android/Expo 成本高，优先选 B，避免把已稳定的动画架构拖回高风险状态。
+
+#### Phase 4：低端机与长时运行保护
+
+- 目标：让低端 Android 和发热降频场景仍可用。
+- 范围：动画预算、可选降级、页面离开停机、后台恢复重置。
+- 策略：默认不降视觉；只有真机 release 证明确实掉帧时，才考虑响应式降级，例如降低粒子数量、降低 canvas DPR、减少非核心装饰动画，而不是先砍频谱柱。
+- 验收：低端机连续 20 分钟播放不出现交互明显迟钝；暂停/播放不出现越来越卡。
+
+#### Phase 5：自动化质量门禁
+
+- 目标：避免后续新代码把旧动画坑带回来。
+- 范围：脚本或检查项，不一定立即写 CI。
+- 规则：新增动画前必须说明 Reanimated / Skia / Web canvas fallback 分类；提交前跑 TypeScript、Expo export、热点 `rg`；禁止新增 `Animated.Value` 长循环和 `requestAnimationFrame + setState`。
+- 验收：每个动画 PR 或任务都有“技术路径、生命周期 cleanup、验证证据”。
+
+#### Phase 6：播放器产品化能力
+
+- 目标：在动画稳定后，继续推进真正播放器体验。
+- 范围：真实歌单、错误恢复、网络状态、后台播放、锁屏控制、APK 发布流程。
+- 原则：产品能力不要和动画性能重构混在一个任务里；每次只处理一个意图。
+
+### 3. 下一步建议
+
+- 最高优先级：Phase 1 真机 release 验收。原因是浏览器已经很顺，下一瓶颈不该继续凭感觉调，而是确认 APK 的真实表现。
+- 第二优先级：Phase 2 视觉手感细调。原因是它成本低、收益直接，但应建立在 release 表现没有结构性问题的前提上。
+- 第三优先级：Phase 3 真实音频驱动。原因是它会改变数据源和音频架构，复杂度明显高于单纯调动画参数，需要单独 Spec 和 HARD-GATE。

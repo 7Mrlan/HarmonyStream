@@ -14,7 +14,19 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, Text, View, Animated, Easing } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
+import Animated, {
+  Easing,
+  cancelAnimation,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withRepeat,
+  withSequence,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 import Svg, { Rect } from 'react-native-svg';
 
 export type PetAction = 'prev' | 'playPause' | 'next' | 'stop' | 'like' | 'hide' | 'fav' | 'volume';
@@ -390,19 +402,23 @@ function useBlink(active: boolean) {
   const [blinking, setBlinking] = useState(false);
   useEffect(() => {
     if (!active) return;
-    let timer: ReturnType<typeof setTimeout>;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let blinkTimer: ReturnType<typeof setTimeout> | undefined;
     const schedule = () => {
       const wait = 3000 + Math.random() * 3000;
       timer = setTimeout(() => {
         setBlinking(true);
-        setTimeout(() => {
+        blinkTimer = setTimeout(() => {
           setBlinking(false);
           schedule();
         }, 180);
       }, wait);
     };
     schedule();
-    return () => clearTimeout(timer);
+    return () => {
+      if (timer) clearTimeout(timer);
+      if (blinkTimer) clearTimeout(blinkTimer);
+    };
   }, [active]);
   return blinking;
 }
@@ -420,69 +436,81 @@ function useIdleFrame(active: boolean) {
 
 /* Hook：上下漂浮 ±3px / 2.4s */
 function useFloat(active: boolean) {
-  const translateY = useRef(new Animated.Value(0)).current;
+  const translateY = useSharedValue(0);
+
   useEffect(() => {
+    cancelAnimation(translateY);
+
     if (!active) {
-      translateY.setValue(0);
-      return;
+      translateY.value = withTiming(0, { duration: 160, easing: Easing.out(Easing.quad) });
+      return undefined;
     }
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(translateY, {
-          toValue: -3,
+
+    translateY.value = withRepeat(
+      withSequence(
+        withTiming(-3, {
           duration: 1200,
           easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
         }),
-        Animated.timing(translateY, {
-          toValue: 3,
+        withTiming(3, {
           duration: 1200,
           easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
         }),
-      ]),
+      ),
+      -1,
+      false,
     );
-    loop.start();
-    return () => loop.stop();
+
+    return () => {
+      cancelAnimation(translateY);
+    };
   }, [active, translateY]);
+
+  /* 宠物漂浮是持续视觉动画，迁到 Reanimated 防止旧 Animated Web onUpdate。 */
   return translateY;
 }
 
 /* Hook：摇摆 ±2° / 3.6s（比漂浮慢，错开节奏，让动作"动而不乱"） */
 function useWobble(active: boolean) {
-  const rotate = useRef(new Animated.Value(0)).current;
+  const rotate = useSharedValue(0);
+
   useEffect(() => {
+    cancelAnimation(rotate);
+
     if (!active) {
-      rotate.setValue(0);
-      return;
+      rotate.value = withTiming(0, { duration: 160, easing: Easing.out(Easing.quad) });
+      return undefined;
     }
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(rotate, {
-          toValue: 1,
+
+    rotate.value = withRepeat(
+      withSequence(
+        withTiming(1, {
           duration: 1800,
           easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
         }),
-        Animated.timing(rotate, {
-          toValue: -1,
+        withTiming(-1, {
           duration: 1800,
           easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
         }),
-      ]),
+      ),
+      -1,
+      false,
     );
-    loop.start();
-    return () => loop.stop();
+
+    return () => {
+      cancelAnimation(rotate);
+    };
   }, [active, rotate]);
+
+  /* 头部轻微摇摆只改 transform，迁移后不会走 RN Web Animated onUpdate。 */
   return rotate;
 }
 
 function usePetActionMotion(action: PetAction | null | undefined, actionNonce = 0) {
-  const tx = useRef(new Animated.Value(0)).current;
-  const ty = useRef(new Animated.Value(0)).current;
-  const scale = useRef(new Animated.Value(1)).current;
-  const spin = useRef(new Animated.Value(0)).current;
+  const tx = useSharedValue(0);
+  const ty = useSharedValue(0);
+  const scale = useSharedValue(1);
+  const spin = useSharedValue(0);
   const lastAcceptedAtRef = useRef(0);
 
   useEffect(() => {
@@ -491,66 +519,47 @@ function usePetActionMotion(action: PetAction | null | undefined, actionNonce = 
     if (now - lastAcceptedAtRef.current < 30000) return;
     lastAcceptedAtRef.current = now;
 
-    tx.stopAnimation();
-    ty.stopAnimation();
-    scale.stopAnimation();
-    spin.stopAnimation();
-    tx.setValue(0);
-    ty.setValue(0);
-    scale.setValue(1);
-    spin.setValue(0);
+    cancelAnimation(tx);
+    cancelAnimation(ty);
+    cancelAnimation(scale);
+    cancelAnimation(spin);
+    tx.value = 0;
+    ty.value = 0;
+    scale.value = 1;
+    spin.value = 0;
 
     const horizontal = action === 'prev' ? -18 : action === 'next' ? 18 : 0;
     const lift = action === 'playPause' ? -18 : action === 'like' || action === 'fav' ? -10 : action === 'stop' ? 8 : 0;
     const peakScale = action === 'playPause' ? 1.34 : action === 'stop' ? 0.78 : 1.18;
     const spinTo = action === 'prev' ? -1 : action === 'next' ? 1 : action === 'volume' ? 0.5 : 0;
 
-    Animated.parallel([
-      Animated.sequence([
-        Animated.timing(tx, {
-          toValue: horizontal,
-          duration: 260,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-        Animated.spring(tx, { toValue: 0, damping: 9, stiffness: 120, useNativeDriver: true }),
-      ]),
-      Animated.sequence([
-        Animated.timing(ty, {
-          toValue: lift,
-          duration: 260,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-        Animated.spring(ty, { toValue: 0, damping: 9, stiffness: 130, useNativeDriver: true }),
-      ]),
-      Animated.sequence([
-        Animated.timing(scale, {
-          toValue: peakScale,
-          duration: 220,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-        Animated.spring(scale, { toValue: 1, damping: 8, stiffness: 145, useNativeDriver: true }),
-      ]),
-      Animated.sequence([
-        Animated.timing(spin, {
-          toValue: spinTo,
-          duration: 420,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-        Animated.spring(spin, { toValue: 0, damping: 10, stiffness: 120, useNativeDriver: true }),
-      ]),
-    ]).start();
+    tx.value = withSequence(
+      withTiming(horizontal, { duration: 260, easing: Easing.out(Easing.cubic) }),
+      withSpring(0, { damping: 9, stiffness: 120 }),
+    );
+    ty.value = withSequence(
+      withTiming(lift, { duration: 260, easing: Easing.out(Easing.cubic) }),
+      withSpring(0, { damping: 9, stiffness: 130 }),
+    );
+    scale.value = withSequence(
+      withTiming(peakScale, { duration: 220, easing: Easing.out(Easing.cubic) }),
+      withSpring(1, { damping: 8, stiffness: 145 }),
+    );
+    spin.value = withSequence(
+      withTiming(spinTo, { duration: 420, easing: Easing.out(Easing.cubic) }),
+      withSpring(0, { damping: 10, stiffness: 120 }),
+    );
+
+    return () => {
+      cancelAnimation(tx);
+      cancelAnimation(ty);
+      cancelAnimation(scale);
+      cancelAnimation(spin);
+    };
   }, [action, actionNonce, scale, spin, tx, ty]);
 
-  const rotate = spin.interpolate({
-    inputRange: [-1, 1],
-    outputRange: ['-18deg', '18deg'],
-  });
-
-  return { tx, ty, scale, rotate };
+  /* 播放控制触发的宠物反馈统一放到 Reanimated，避免 RN Web SpringAnimation 热点。 */
+  return { tx, ty, scale, spin };
 }
 
 /*
@@ -558,29 +567,34 @@ function usePetActionMotion(action: PetAction | null | undefined, actionNonce = 
  *   idleB 帧时左右双角顶端各闪一下，像金属反光
  */
 function HornGlint({ visible }: { visible: boolean }) {
-  const opacity = useRef(new Animated.Value(0)).current;
-  const scale = useRef(new Animated.Value(0.5)).current;
+  const progress = useSharedValue(0);
 
   useEffect(() => {
+    cancelAnimation(progress);
+
     if (!visible) {
-      opacity.setValue(0);
-      scale.setValue(0.5);
-      return;
+      progress.value = 0;
+      return undefined;
     }
-    Animated.parallel([
-      Animated.sequence([
-        Animated.timing(opacity, { toValue: 1, duration: 120, useNativeDriver: true }),
-        Animated.delay(180),
-        Animated.timing(opacity, { toValue: 0, duration: 200, useNativeDriver: true }),
-      ]),
-      Animated.timing(scale, {
-        toValue: 1.4,
-        duration: 500,
-        easing: Easing.out(Easing.quad),
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, [visible, opacity, scale]);
+
+    progress.value = 0;
+    progress.value = withTiming(1, {
+      duration: 500,
+      easing: Easing.out(Easing.quad),
+    });
+
+    return () => {
+      cancelAnimation(progress);
+    };
+  }, [progress, visible]);
+
+  const glintStyle = useAnimatedStyle(() => {
+    const opacity = progress.value < 0.24 ? progress.value / 0.24 : progress.value < 0.6 ? 1 : Math.max(0, 1 - (progress.value - 0.6) / 0.4);
+    return {
+      opacity,
+      transform: [{ scale: 0.5 + progress.value * 0.9 }],
+    };
+  });
 
   /* 两道光闪，分别贴在左右双角的位置（容器 56×56，sprite 居中 48×48）
    * 双角在 sprite 顶部约第 0-1 行，x ≈ 6 与 9（16 列网格） */
@@ -594,16 +608,17 @@ function HornGlint({ visible }: { visible: boolean }) {
         <Animated.View
           key={i}
           pointerEvents="none"
-          style={{
-            position: 'absolute',
-            left: p.left,
-            top: p.top,
-            width: 4,
-            height: 4,
-            backgroundColor: '#fde68a',
-            opacity,
-            transform: [{ scale }],
-          }}
+          style={[
+            {
+              position: 'absolute',
+              left: p.left,
+              top: p.top,
+              width: 4,
+              height: 4,
+              backgroundColor: '#fde68a',
+            },
+            glintStyle,
+          ]}
         />
       ))}
     </>
@@ -614,6 +629,68 @@ function HornGlint({ visible }: { visible: boolean }) {
  * 子组件：点击时迸发的火花粒子
  *   4 颗粒子从中心向四个角飞散 + 淡出
  */
+function SparkleParticle({
+  trigger,
+  color,
+  dx,
+  dy,
+}: {
+  trigger: number;
+  color: string;
+  dx: number;
+  dy: number;
+}) {
+  const progress = useSharedValue(0);
+
+  useEffect(() => {
+    cancelAnimation(progress);
+
+    if (trigger === 0) {
+      progress.value = 0;
+      return undefined;
+    }
+
+    progress.value = 0;
+    progress.value = withTiming(1, {
+      duration: 500,
+      easing: Easing.out(Easing.quad),
+    });
+
+    return () => {
+      cancelAnimation(progress);
+    };
+  }, [dx, dy, progress, trigger]);
+
+  /* 点击火花属于短促视觉反馈，改为单一 progress，避免 4 组旧动画并行动画残留。 */
+  const sparkleStyle = useAnimatedStyle(() => ({
+    opacity: trigger === 0 ? 0 : Math.max(0, 1 - progress.value),
+    transform: [
+      { translateX: dx * progress.value },
+      { translateY: dy * progress.value },
+      { scale: 1 - progress.value * 0.15 },
+    ],
+  }));
+
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        {
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          marginTop: -2,
+          marginLeft: -2,
+          width: 4,
+          height: 4,
+          backgroundColor: color,
+        },
+        sparkleStyle,
+      ]}
+    />
+  );
+}
+
 function Sparkles({ trigger, color }: { trigger: number; color: string }) {
   /* 4 颗粒子，向四个对角方向飞 */
   const directions: Array<[number, number]> = [
@@ -623,66 +700,10 @@ function Sparkles({ trigger, color }: { trigger: number; color: string }) {
     [18, 18],
   ];
 
-  const animsRef = useRef(
-    directions.map(() => ({
-      tx: new Animated.Value(0),
-      ty: new Animated.Value(0),
-      op: new Animated.Value(0),
-    })),
-  );
-
-  useEffect(() => {
-    if (trigger === 0) return;
-    animsRef.current.forEach((a, i) => {
-      const dir = directions[i];
-      if (!dir) return;
-      const [dx, dy] = dir;
-      a.tx.setValue(0);
-      a.ty.setValue(0);
-      a.op.setValue(1);
-      Animated.parallel([
-        Animated.timing(a.tx, {
-          toValue: dx,
-          duration: 500,
-          easing: Easing.out(Easing.quad),
-          useNativeDriver: true,
-        }),
-        Animated.timing(a.ty, {
-          toValue: dy,
-          duration: 500,
-          easing: Easing.out(Easing.quad),
-          useNativeDriver: true,
-        }),
-        Animated.timing(a.op, {
-          toValue: 0,
-          duration: 500,
-          easing: Easing.out(Easing.quad),
-          useNativeDriver: true,
-        }),
-      ]).start();
-    });
-    /* 仅依赖 trigger 计数变化；directions 与 animsRef 为稳定引用 */
-  }, [trigger]);
-
   return (
     <>
-      {animsRef.current.map((a, i) => (
-        <Animated.View
-          key={i}
-          pointerEvents="none"
-          style={{
-            position: 'absolute',
-            top: '50%',
-            left: '50%',
-            marginTop: -2,
-            marginLeft: -2,
-            width: 4,
-            height: 4,
-            backgroundColor: color,
-            opacity: a.op,
-            transform: [{ translateX: a.tx }, { translateY: a.ty }],
-          }}
-        />
+      {directions.map(([dx, dy], i) => (
+        <SparkleParticle key={i} trigger={trigger} color={color} dx={dx} dy={dy} />
       ))}
     </>
   );
@@ -701,7 +722,7 @@ export function PixelPetSwitcher({
   const active = pets.find((p) => p.id === activeId) ?? pets[0];
 
   /* 缩放（点击 pop） */
-  const scale = useRef(new Animated.Value(1)).current;
+  const pressScale = useSharedValue(1);
   /* 漂浮 */
   const translateY = useFloat(true);
   /* 摇摆 */
@@ -713,11 +734,35 @@ export function PixelPetSwitcher({
   const idleFrame = useIdleFrame(true);
   /* 招呼气泡显隐 */
   const [showBubble, setShowBubble] = useState(false);
-  const bubbleOpacity = useRef(new Animated.Value(0)).current;
+  const bubbleOpacity = useSharedValue(0);
   /* 点击触发的"开心"状态：true 时显示 happy 帧 */
   const [happy, setHappy] = useState(false);
+  const happyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /* 火花粒子 trigger 计数（每点一次 +1） */
   const [sparkTrigger, setSparkTrigger] = useState(0);
+
+  /* 宠物的所有 transform 合并到一条 Reanimated 管线，避免多个 transform style 互相覆盖。 */
+  const petMotionStyle = useAnimatedStyle(() => ({
+    transform: [
+      { scale: pressScale.value * actionMotion.scale.value },
+      { translateX: actionMotion.tx.value },
+      { translateY: translateY.value + actionMotion.ty.value },
+      { rotate: `${rotate.value * 2 + actionMotion.spin.value * 18}deg` },
+    ],
+  }));
+
+  /* 长按气泡只做 opacity 变化，结束后用 runOnJS 回到 React 状态。 */
+  const bubbleStyle = useAnimatedStyle(() => ({
+    opacity: bubbleOpacity.value,
+  }));
+
+  useEffect(() => {
+    return () => {
+      if (happyTimerRef.current) clearTimeout(happyTimerRef.current);
+      cancelAnimation(pressScale);
+      cancelAnimation(bubbleOpacity);
+    };
+  }, [bubbleOpacity, pressScale]);
 
   function handlePress() {
     if (!pets.length) return;
@@ -727,15 +772,21 @@ export function PixelPetSwitcher({
     if (!nextPet) return;
 
     /* pop 动画：缩 → 弹 → 复 */
-    Animated.sequence([
-      Animated.timing(scale, { toValue: 0.7, duration: 70, useNativeDriver: true }),
-      Animated.timing(scale, { toValue: 1.3, duration: 130, useNativeDriver: true }),
-      Animated.timing(scale, { toValue: 1, duration: 130, useNativeDriver: true }),
-    ]).start();
+    cancelAnimation(pressScale);
+    pressScale.value = 1;
+    pressScale.value = withSequence(
+      withTiming(0.7, { duration: 70, easing: Easing.out(Easing.quad) }),
+      withTiming(1.3, { duration: 130, easing: Easing.out(Easing.cubic) }),
+      withTiming(1, { duration: 130, easing: Easing.out(Easing.quad) }),
+    );
 
     /* happy 帧持续 600ms 后回 idle */
     setHappy(true);
-    setTimeout(() => setHappy(false), 600);
+    if (happyTimerRef.current) clearTimeout(happyTimerRef.current);
+    happyTimerRef.current = setTimeout(() => {
+      setHappy(false);
+      happyTimerRef.current = null;
+    }, 600);
 
     /* 触发火花粒子 */
     setSparkTrigger((c) => c + 1);
@@ -747,11 +798,17 @@ export function PixelPetSwitcher({
   function handleLongPress() {
     if (!active) return;
     setShowBubble(true);
-    Animated.sequence([
-      Animated.timing(bubbleOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
-      Animated.delay(1400),
-      Animated.timing(bubbleOpacity, { toValue: 0, duration: 200, useNativeDriver: true }),
-    ]).start(() => setShowBubble(false));
+    cancelAnimation(bubbleOpacity);
+    bubbleOpacity.value = 0;
+    bubbleOpacity.value = withSequence(
+      withTiming(1, { duration: 200, easing: Easing.out(Easing.quad) }),
+      withDelay(
+        1400,
+        withTiming(0, { duration: 200, easing: Easing.out(Easing.quad) }, (finished) => {
+          if (finished) runOnJS(setShowBubble)(false);
+        }),
+      ),
+    );
     onLongPress?.(active.id);
   }
 
@@ -768,19 +825,13 @@ export function PixelPetSwitcher({
   const highlight = active.highlight ?? '#ffffff';
   const shadow = active.shadow ?? '#000000';
 
-  /* 把 [-1,1] 映射成 ±2° 旋转字符串 */
-  const rotateStr = rotate.interpolate({
-    inputRange: [-1, 1],
-    outputRange: ['-2deg', '2deg'],
-  });
-
   return (
     <View className="items-end">
       {/* 招呼气泡（长按触发） */}
       {showBubble ? (
         <Animated.View
           className="border border-line bg-panel px-2 py-1 mb-1"
-          style={{ opacity: bubbleOpacity }}
+          style={bubbleStyle}
         >
           <Text className="font-mono text-text text-xs">{active.greeting}</Text>
         </Animated.View>
@@ -791,24 +842,18 @@ export function PixelPetSwitcher({
       <Pressable onPress={handlePress} onLongPress={handleLongPress} hitSlop={8} delayLongPress={400}>
         <Animated.View
           className="border border-line"
-          style={{
-            width: 56,
-            height: 56,
-            backgroundColor: '#0a0a0a',
-            transform: [
-              { scale },
-              { scale: actionMotion.scale },
-              { translateX: actionMotion.tx },
-              { translateY },
-              { translateY: actionMotion.ty },
-              { rotate: rotateStr },
-              { rotate: actionMotion.rotate },
-            ],
-            alignItems: 'center',
-            justifyContent: 'center',
-            position: 'relative',
-            overflow: 'visible',
-          }}
+          style={[
+            {
+              width: 56,
+              height: 56,
+              backgroundColor: '#0a0a0a',
+              alignItems: 'center',
+              justifyContent: 'center',
+              position: 'relative',
+              overflow: 'visible',
+            },
+            petMotionStyle,
+          ]}
         >
           {/* 铠甲战士头冠光闪：DeepSeek 在 idleB 帧时双角金属反光 */}
           {active.id === 'deepseek' && !happy ? (

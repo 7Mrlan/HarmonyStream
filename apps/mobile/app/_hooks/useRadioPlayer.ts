@@ -34,6 +34,8 @@ export interface RadioPlayerState {
   track: RadioTrack;
   /* 是否正在播放 */
   playing: boolean;
+  /* 当前曲目是否已经播放到结尾 */
+  ended: boolean;
   /* 当前进度（秒） */
   position: number;
   /* 总时长（秒），加载中可能为 0 */
@@ -130,6 +132,16 @@ export function useRadioPlayer(
   const player = useAudioPlayer(source);
   /* 100ms 一次的状态订阅，用于驱动 UI */
   const status = useAudioPlayerStatus(player);
+  /* UI 层统一消费秒，避免 Web/Native 单位差异污染动画组件。 */
+  const positionSeconds = fromPlayerTime(status.currentTime);
+  const durationSeconds = status.duration > 0 ? fromPlayerTime(status.duration) : (track.durationFallback ?? 0);
+  /*
+   * 结束态优先信任 expo-audio 的 didJustFinish。
+   * 兜底判断用于 Web/轮询边界：停在总时长附近且未播放时，也视为结束态。
+   */
+  const ended =
+    status.didJustFinish ||
+    (!status.playing && durationSeconds > 0 && positionSeconds >= Math.max(durationSeconds - 0.25, 0));
 
   useEffect(() => {
     if (!shouldAutoPlayRef.current) return;
@@ -137,12 +149,29 @@ export function useRadioPlayer(
     player.play();
   }, [player, track.url]);
 
+  const restartAndPlay = useCallback(() => {
+    /* 播完后再次播放要先回到 0 秒，否则部分平台会停在末尾不触发可见反馈。 */
+    void player.seekTo(0).then(() => {
+      player.play();
+    });
+  }, [player]);
+
   const toggle = useCallback(() => {
+    if (ended) {
+      restartAndPlay();
+      return;
+    }
     if (status.playing) player.pause();
     else player.play();
-  }, [player, status.playing]);
+  }, [ended, player, restartAndPlay, status.playing]);
 
-  const play = useCallback(() => player.play(), [player]);
+  const play = useCallback(() => {
+    if (ended) {
+      restartAndPlay();
+      return;
+    }
+    player.play();
+  }, [ended, player, restartAndPlay]);
   const pause = useCallback(() => player.pause(), [player]);
 
   const stop = useCallback(() => {
@@ -171,8 +200,9 @@ export function useRadioPlayer(
   return {
     track,
     playing: status.playing,
-    position: fromPlayerTime(status.currentTime),
-    duration: status.duration > 0 ? fromPlayerTime(status.duration) : (track.durationFallback ?? 0),
+    ended,
+    position: positionSeconds,
+    duration: durationSeconds,
     buffering: !status.isLoaded,
     toggle,
     play,

@@ -272,19 +272,19 @@ pnpm dev:mobile
 - [x] 调研当前动画瓶颈、依赖状态与 Expo SDK 52 官方兼容版本
 - [x] 确认现状分析
 - [x] 确认功能点与改造边界
-- [ ] 确认风险与决策
-- [ ] HARD-GATE：用户确认完整 Spec 后开始编码
-- [ ] 安装 SDK 52 兼容的 `react-native-reanimated` 与 `@shopify/react-native-skia`
-- [ ] 将进度条拖动改为 Reanimated/UI 线程驱动，降低拖动延迟
-- [ ] 将频谱或粒子绘制迁移到 Skia，保留视觉效果并降低 React 重渲染
-- [ ] 补齐 Web/Expo 兼容入口或降级路径
-- [ ] 执行 TypeScript 与移动端验证
-- [ ] 建立首个 Git 提交或至少完成可审查的 Git 状态
+- [x] 确认风险与决策
+- [x] HARD-GATE：用户确认完整 Spec 后开始编码
+  - [x] 安装 SDK 52 兼容的 `react-native-reanimated` 与 `@shopify/react-native-skia`
+  - [x] 将进度条拖动改为 Reanimated/UI 线程驱动，降低拖动延迟
+  - [x] 将频谱或粒子绘制迁移到 Skia，保留视觉效果并降低 React 重渲染
+  - [x] 补齐 Web/Expo 兼容入口或降级路径
+  - [x] 执行 TypeScript 与移动端验证
+  - [x] 建立首个 Git 提交或至少完成可审查的 Git 状态
 
 ### 2026-05-22 动画架构升级与 Git 管理 Review
-- [ ] 完成日期：
-- [ ] 验证证据：
-- [ ] 残余风险：
+  - [x] 完成日期：2026-05-22
+  - [x] 验证证据：终端命令 `pnpm.cmd exec tsc --noEmit -p packages/ui/tsconfig.json` 通过；终端命令 `pnpm.cmd exec tsc --noEmit -p apps/mobile/tsconfig.json` 通过；终端命令 `pnpm.cmd --filter @claudio/mobile exec expo export --platform web` 成功导出 `dist`；终端命令 `pnpm.cmd --filter @claudio/mobile exec expo export --platform android` 成功导出 Android bundle；`rg` 复核新的 `PlaybackProgressBar` / `NowPlayingBar` 不再包含旧的 `setRenderFrame`、`setParticles` 与拖动时每次 move 触发 `onSeek`
+  - [x] 残余风险：当前 `react-native-worklets@0.8.3` 作为 `nativewind/babel` 的间接构建依赖仍会给出 React Native 版本 peer warning，但 Web / Android bundle 已实测可编译；尚未在真实 Expo Go / Android 模拟器上手动拖动进度条做交互级长时间验证
 
 ## 2026-05-22 NowPlayingBar 进度条功能修正
 - [x] 确认现状分析：定位红色区域、时间显示、进度条动画与真实播放状态的当前关系
@@ -302,3 +302,69 @@ pnpm dev:mobile
 - [x] 完成日期：2026-05-22
 - [x] 验证证据：终端命令 `pnpm.cmd exec tsc --noEmit -p packages/ui/tsconfig.json` 通过；终端命令 `pnpm.cmd exec tsc --noEmit -p apps/mobile/tsconfig.json` 通过；`rg` 复核目标渲染区域无 `VELOCITY:` 与紫色底部细线。
 - [x] 残余风险：当前未新增 Skia/Reanimated 原生依赖，本轮是现有 `react-native-svg` + `Animated` 下的低风险优化；如果长时间真机仍卡，再单独评估 Skia/Reanimated。
+
+## 2026-05-22 动画卡顿与进度条拖动修复
+- [x] 修复 `PlaybackProgressBar` 拖动时被外部 `position` 高频同步拉回原点/旧位置的问题
+- [x] 将 Web 频谱降级路径从 48 个 Animated/SVG 节点改为单 canvas 绘制
+- [x] 将播放按钮呼吸、涟漪、按压缩放从 React Native `Animated.Value` 迁移到 Reanimated
+- [x] 将主屏进度条宽度调整为 `82%` 且最大 `520`
+- [x] 执行 TypeScript、Web 导出、Android 导出验证
+
+### 2026-05-22 动画卡顿与进度条拖动修复 Review
+- [x] 完成日期：2026-05-22
+- [x] 验证证据：终端命令 `pnpm.cmd exec tsc --noEmit -p packages/ui/tsconfig.json` 通过；终端命令 `pnpm.cmd exec tsc --noEmit -p apps/mobile/tsconfig.json` 通过；终端命令 `pnpm.cmd --filter @claudio/mobile exec expo export --platform web` 成功导出 `dist`；终端命令 `pnpm.cmd --filter @claudio/mobile exec expo export --platform android` 成功导出 Android bundle。
+- [x] 残余风险：尚未在浏览器里手动长时间播放几分钟做体感验收；如果清缓存后仍有延迟，下一步优先继续排查播放器状态轮询频率和其它仍占用 JS 的动画/计时器。
+
+## 2026-05-22 动画生命周期与按钮反馈优化
+- [x] 在 `useRadioPlayer` 暴露 `ended`，并优化播完后的再次播放行为
+- [x] 将 `ended` / `animationActive` 传入主播放器动画组件
+- [x] 优化 `MusicSpectrum`：暂停/结束时快速下落并停止，重新播放时重置入场
+- [x] 优化 `PlaybackProgressBar`：暂停/结束后停止粒子和尾焰循环，拖动时仍保留短反馈
+- [x] 优化 `PlayerControls`：按下瞬间启动快速反馈动画
+- [x] 执行 TypeScript、Web 导出、Android 导出和热点扫描验证
+
+### 2026-05-22 动画生命周期与按钮反馈优化 Review
+- [x] 完成日期：2026-05-22
+- [x] 验证证据：终端命令 `pnpm.cmd exec tsc --noEmit -p packages/ui/tsconfig.json` 通过；终端命令 `pnpm.cmd exec tsc --noEmit -p apps/mobile/tsconfig.json` 通过；终端命令 `pnpm.cmd --filter @claudio/mobile exec expo export --platform web` 成功导出 `dist`；终端命令 `pnpm.cmd --filter @claudio/mobile exec expo export --platform android` 成功导出 Android bundle；`rg` 复核 `ended`、`animationActive`、`restartAndPlay` 已接入播放器链路。
+- [x] 残余风险：本轮未迁移 `PixelClock`、`OnAirIndicator`、`ScanlineOverlay`、`PixelPetSwitcher`、`ChatInput` 等非播放器装饰动画；如果长时间运行仍卡，下一轮应做全页面动画预算和逐项迁移。
+
+## 2026-05-22 Trace 驱动的残留动画迁移
+- [x] 删除首屏全屏 `ScanlineOverlay` 调用、导出和源码文件
+- [x] 将 `PixelClock` 冒号呼吸迁移到 Reanimated
+- [x] 将 `OnAirIndicator` 红点和扩散环迁移到 Reanimated
+- [x] 将 `ChatInput` 边框光效从 RAF + state 迁移到 Reanimated
+- [x] 将 `DJBubble` LIVE 红点闪烁迁移到 Reanimated
+- [x] 将 `PixelPetSwitcher` 旧 Animated 动画迁移到 Reanimated
+- [x] 执行 TypeScript、Web/Android 导出和热点扫描验证
+
+### 2026-05-22 Trace 驱动的残留动画迁移 Review
+- [x] 完成日期：2026-05-22
+- [x] 验证证据：终端命令 `pnpm.cmd exec tsc --noEmit` 通过；终端命令 `pnpm.cmd typecheck` 通过；终端命令 `pnpm.cmd --filter @claudio/mobile exec expo export` 成功导出 Web、iOS、Android bundle；`rg` 复核 `PixelClock`、`OnAirIndicator`、`ChatInput`、`DJBubble`、`PixelPetSwitcher`、`apps/mobile/app/index.tsx`、`packages/ui/src/index.ts` 不再包含旧 `Animated.Value` / `Animated.loop` / `Animated.timing` / `requestAnimationFrame` 热路径；`rg` 复核 `apps/mobile` 与 `packages/ui/src` 不再包含 `ScanlineOverlay` 代码引用。
+- [x] 残余说明：`MusicSpectrum` 的 Web fallback 仍保留单 canvas `requestAnimationFrame` 绘制循环，这是上一轮为替代 48 个 SVG/Animated 节点而保留的 Web 降级绘制路径；Native 路径使用 Skia/Reanimated，Web 路径已具备启动前 cancel、inactive 后自动停止和清空保护。
+
+## 2026-05-22 动画框架设计准入固化
+- [x] 核对当前动画技术分布，确认不是所有 UI 都同时使用 Reanimated + Skia
+- [x] 在 `tasks/spec.md` 写入动画框架设计准入规范
+- [x] 明确 Reanimated、Skia、Web canvas fallback、React state 的职责边界
+- [x] 明确新动画禁止新增旧 `Animated.Value` 长循环和 `requestAnimationFrame + setState` 热路径
+- [x] 补充 lessons，防止后续把“Reanimated + Skia”误解成所有 UI 强行同构
+
+### 2026-05-22 动画框架设计准入固化 Review
+- [x] 完成日期：2026-05-22
+- [x] 验证证据：`rg` 已核对当前动画技术分布；`tasks/spec.md` 已新增“动画框架设计准入规范”；`tasks/lessons.md` 已补充后续动画选型规则。
+- [x] 残余说明：Web 端 `MusicSpectrum` 继续使用单 canvas fallback，不等同于架构倒退；它是为了避免 CanvasKit 开发加载成本，同时保持高频绘制不进入 React state。
+
+## 2026-05-22 后续优化路线
+- [x] 核对当前剩余动画与计时器分布
+- [x] 在 `tasks/spec.md` 写入后续优化路线
+- [ ] Phase 1：APK release 真机性能验收
+- [ ] Phase 2：视觉手感细调，重点是频谱 attack/decay、进度条比例、按钮触感
+- [ ] Phase 3：真实音频驱动频谱方案调研，比较运行时分析与预分析 JSON
+- [ ] Phase 4：低端机与长时运行保护，确认是否需要响应式降级
+- [ ] Phase 5：自动化质量门禁，固化热点扫描和动画准入检查
+- [ ] Phase 6：播放器产品化能力，后台播放、锁屏控制、错误恢复、发布流程
+
+### 2026-05-22 后续优化路线 Review
+- [x] 完成日期：2026-05-22
+- [x] 验证证据：`rg` 已复核当前目标 UI 动画组件不再包含旧 RN `Animated.Value` 长循环；路线已写入 `tasks/spec.md`。
+- [x] 残余说明：路线只是规划，不代表开始编码；真实音频驱动和 APK release 验收都需要单独任务与确认。

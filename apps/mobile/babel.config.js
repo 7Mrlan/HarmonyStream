@@ -2,15 +2,17 @@
  * Babel 配置
  * ----------
  * NativeWind 通过 jsxImportSource 实现 className → style 转换。
- * 注意：reanimated 3.16+ 已把 babel plugin 拆分到独立包 react-native-worklets，
- *      Iter 0 暂未用到呼吸动画，先不加该插件；Iter 1 起若需要呼吸/帧动画，
- *      安装 react-native-worklets 后再补回 'react-native-worklets/plugin'。
+ * Reanimated 接入说明：
+ *   - Reanimated 3 的 worklet 与 logger 需要 `react-native-reanimated/plugin`
+ *     做 Babel 转换，否则 Web 运行时会出现 `_reanimatedLoggerConfig is not defined`。
+ *   - 但 `nativewind/babel` 目前会间接引用 `react-native-worklets/plugin`，
+ *     因此构建依赖里仍需保留 `react-native-worklets` 包本体。
  */
 
 module.exports = function (api) {
   api.cache(true);
   return {
     presets: [['babel-preset-expo', { jsxImportSource: 'nativewind' }], 'nativewind/babel'],
-    plugins: [],
+    plugins: ['react-native-reanimated/plugin'],
   };
 };

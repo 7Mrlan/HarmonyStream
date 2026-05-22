@@ -26,6 +26,9 @@ export type { MusicSpectrumProps } from './MusicSpectrum';
 export { NowPlayingBar } from './NowPlayingBar';
 export type { NowPlayingBarProps } from './NowPlayingBar';
 
+export { PlaybackProgressBar } from './PlaybackProgressBar';
+export type { PlaybackProgressBarProps } from './PlaybackProgressBar';
+
 export { OnAirIndicator } from './OnAirIndicator';
 export type { OnAirIndicatorProps } from './OnAirIndicator';
 
@@ -37,9 +40,6 @@ export type { PetAction, PixelPetSwitcherProps, PetMeta } from './PixelPetSwitch
 
 export { PlayerControls } from './PlayerControls';
 export type { PlayerControlAction, PlayerControlsProps } from './PlayerControls';
-
-export { ScanlineOverlay } from './ScanlineOverlay';
-export type { ScanlineOverlayProps } from './ScanlineOverlay';
 
 export { TopBar } from './TopBar';
 export type { TopBarProps } from './TopBar';
