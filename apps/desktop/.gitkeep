@@ -1,0 +1,7 @@
+# 占位目录：apps/desktop
+
+mac 桌面端将在 v2 启动，路线候选：
+1. react-native-macos（与移动端同源最高）
+2. Tauri + React Web 壳（Web 复用 expo-web 输出）
+
+具体决策以届时的 spec.md 更新为准。

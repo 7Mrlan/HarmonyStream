@@ -1,0 +1,31 @@
+{
+  "name": "claudio",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=18.18.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "dev:mobile": "pnpm --filter @claudio/mobile dev",
+    "dev:server": "pnpm --filter @claudio/server dev",
+    "build": "pnpm -r build",
+    "typecheck:api": "tsc --noEmit -p packages/api/tsconfig.json",
+    "typecheck:core": "tsc --noEmit -p packages/core/tsconfig.json",
+    "typecheck:ui": "tsc --noEmit -p packages/ui/tsconfig.json",
+    "typecheck:mobile": "tsc --noEmit -p apps/mobile/tsconfig.json",
+    "typecheck:server": "tsc --noEmit -p server/tsconfig.json",
+    "typecheck": "pnpm typecheck:api && pnpm typecheck:core && pnpm typecheck:ui && pnpm typecheck:mobile && pnpm typecheck:server",
+    "lint": "eslint . --ext .ts,.tsx --ignore-pattern node_modules --ignore-pattern dist --ignore-pattern android --ignore-pattern ios --ignore-pattern .expo",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\""
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "eslint": "^8.57.0",
+    "prettier": "^3.2.5",
+    "typescript": "^5.4.5"
+  }
+}

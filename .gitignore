@@ -1,0 +1,44 @@
+# 依赖
+node_modules/
+.pnpm-store/
+
+# 构建产物
+dist/
+build/
+*.tsbuildinfo
+
+# Expo
+.expo/
+.expo-shared/
+web-build/
+android/
+ios/
+
+# 环境变量与密钥
+.env
+.env.local
+.env.*.local
+
+# 服务端运行时数据
+server/data/
+!server/data/.gitkeep
+
+# 缓存
+.cache/
+.turbo/
+
+# 日志
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Git submodule（ncm 项目独立管理）
+server/ncm/
