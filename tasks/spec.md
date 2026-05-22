@@ -532,3 +532,174 @@ ESLint `no-restricted-imports` 强制约束反向依赖。
 - 最高优先级：Phase 1 真机 release 验收。原因是浏览器已经很顺，下一瓶颈不该继续凭感觉调，而是确认 APK 的真实表现。
 - 第二优先级：Phase 2 视觉手感细调。原因是它成本低、收益直接，但应建立在 release 表现没有结构性问题的前提上。
 - 第三优先级：Phase 3 真实音频驱动。原因是它会改变数据源和音频架构，复杂度明显高于单纯调动画参数，需要单独 Spec 和 HARD-GATE。
+
+---
+
+## 2026-05-22 主线复位 Spec：AI 电台最小闭环（已确认）
+
+> 本节覆盖上一节“后续优化路线”的优先级判断。上一节是 UI / 动画分支路线，不再作为当前主进程。当前主进程回到最初施工图：让 Claudio 先具备 AI 主播、真实音乐来源、服务端 API 和移动端调用闭环。
+
+### 1. 现状分析
+
+- `server/src/index.ts` / `app.get('/health')`：服务端当前只实现 `GET /health` 健康检查；`start` 只负责启动 Fastify 服务。`/api/chat`、`/api/now`、`/api/next`、`/api/taste`、`/api/plan/today`、`/api/models`、`/stream` 都没有真实路由实现。
+- `packages/api/src/types.ts` / `ChatRequest`、`ChatResponse`、`NowResponse`、`NextResponse`、`StreamEvent`：共享契约类型已经存在，但只是类型定义；`packages/api/src/index.ts` / top-level export 当前只导出类型，没有 HTTP client 或 WebSocket client。
+- `packages/core/src/index.ts` / `CORE_VERSION`：业务核心层仍是占位导出，没有 router、context、LLM adapter、music queue、state store 或 scheduler 逻辑。
+- `apps/mobile/app/index.tsx` / `HomeScreen`：主屏已经完成 UI 组装和播放控件接线，但 `DJBubble` 使用本地常量 `DJ_SCRIPT`；`ChatInput` 的 `onSend` 和 `onMicPress` 都是空函数；`ConnectionStatus` 固定显示 connected，没有真实后端连接状态。
+- `apps/mobile/app/_hooks/useRadioPlayer.ts` / `useRadioPlayer`：播放器 Hook 能播放音频、暂停、seek、切换曲目，但 `DEFAULT_PLAYLIST` 是 SoundHelix 测试 mp3；注释也标明这是 `v1 mock`，不是网易云、服务端推荐或 AI 选曲结果。
+- `server/data/.gitkeep` / data placeholder：服务端数据目录只有占位文件，没有 `taste.md`、`routines.md`、`playlists.json`、`mood-rules.md`、SQLite 状态库或 TTS cache。
+
+### 2. 主线目标
+
+- 第一目标不是继续 UI 微调，而是完成“用户输入 -> 后端理解 -> AI 主播回复 -> 推荐/解析音乐 -> App 播放 -> UI 显示 now-playing”的最小闭环。
+- 当前阶段不追求完整电台自动化，也不先做 APK release、锁屏控制、后台播放、真实音频频谱分析；这些都排到 AI 电台闭环之后。
+- MVP 必须至少有一条真实 API 调用链，不再允许只靠 mock 文案和测试 mp3 证明进度。
+
+### 3. 分阶段路线
+
+#### Phase A：后端 API 骨架与内存电台状态
+
+- 新增服务端路由模块，先落地 `POST /api/chat`、`GET /api/now`、`GET /api/next`、`GET /api/models`、`POST /api/models/switch` 和 `WS /stream` 的最小实现。
+- 先用内存状态保存 current track、queue、messages、current model，避免一上来引入 SQLite / Drizzle 让主线变重。
+- `/api/chat` 初期可以先返回可控 mock，但必须走真实 HTTP 路由和共享契约，给移动端接入提供稳定接口。
+
+#### Phase B：移动端接入服务端 API
+
+- `packages/api` 增加轻量 HTTP client，移动端不直接散写 fetch URL。
+- `HomeScreen` 的 `ChatInput.onSend` 调用 `/api/chat`；`DJBubble` 显示服务端返回的 `say`；`NowPlayingBar` 和播放器队列消费 `/api/now` / `/api/next`。
+- `ConnectionStatus` 改为真实反映 API / WS 连接状态，而不是固定 connected。
+
+#### Phase C：LLM 主播最小接入
+
+- 服务端增加 OpenAI-compatible LLM adapter，优先接 DeepSeek；环境变量缺失时保留 mock fallback，保证开发态可运行。
+- LLM 输出先严格限制为 `ChatResponse` 对应结构：`say`、`play`、`reason`、`segue`，避免自由文本污染业务流程。
+- prompt 组装先做最小版本：系统人设 + 当前用户输入 + 当前播放状态；`taste.md`、`routines.md` 等长期上下文随后补。
+
+#### Phase D：音乐来源接入
+
+- 服务端增加音乐搜索与解析层，先接网易云搜索 / 直链方案；如果真实直链失败，才回退 SoundHelix 测试曲目。
+- 播放器不再内置固定 `DEFAULT_PLAYLIST` 作为主数据源，而是消费服务端返回的 `Track`。
+- 频谱仍可保持伪律动；真实音频能量分析不是本阶段目标。
+
+#### Phase E：TTS 入声
+
+- AI 文案链路稳定后再接 TTS，优先 Edge TTS 或项目后续确认的 Fish TTS。
+- TTS 结果走 `tts-ready` stream 事件和服务端 cache，不阻塞 `/api/chat` 的文本响应。
+
+#### Phase F：产品化与发布
+
+- AI 主播和真实音乐闭环跑通后，再回头做后台播放、锁屏控制、APK release、长时运行、低端机降级、真实频谱等产品化任务。
+
+### 4. 决策与边界
+
+- 决策 1：当前主进程改为“AI 电台后端闭环”，UI / 动画 release 验收暂时降级为支线。
+- 决策 2：先做内存状态，不先做数据库。这样可以最快打通施工图的第二层本地大脑和第四层交互层。
+- 决策 3：`/api/chat` 可以从 mock 起步，但必须是服务端真实路由，移动端必须真实调用，不能继续在 `HomeScreen` 写本地常量冒充主播。
+- 决策 4：LLM、音乐、TTS 分三步接，不混在同一个大改里。先文本闭环，再音乐闭环，再声音闭环。
+- 决策 5：每一步都必须有验证证据：服务端路由请求结果、移动端调用结果、TypeScript 结果；涉及 `packages/*` 源码后提醒清 Metro / 浏览器缓存。
+
+### 5. 下一步
+
+- 先更新 `tasks/todo.md`，把当前下一任务设为“Phase A：后端 API 骨架与内存电台状态”。
+- Phase A 属于中等复杂度任务；编码前需要单独列出文件级计划并等待 HARD-GATE。
+
+---
+
+## 2026-05-22 Phase A：后端 API 骨架与内存电台状态 Spec（已确认并执行）
+
+### 1. 现状分析（已确认）
+
+- `server/src/index.ts` / `app.get('/health')`：当前 Fastify 实例直接在入口文件里创建，只注册了健康检查路由；还没有 `routes` 目录、插件注册函数或按模块拆分的路由结构。
+- `server/src/index.ts` / `start`：启动逻辑已经统一监听 `0.0.0.0:${env.PORT}`，Phase A 可以保留这个入口，只在 `start` 前增加路由 / websocket 注册，不需要改动启动载体。
+- `server/src/env.ts` / `EnvSchema`：当前已支持 `PORT`、`NODE_ENV`、`LOG_LEVEL`、`SHARED_TOKEN`；Phase A 若只做 mock API 和内存状态，暂时不需要新增 LLM / 音乐服务环境变量。
+- `server/package.json` / `dependencies`：已有 `fastify`、`@fastify/websocket`、`zod`、`@claudio/api`；Phase A 可以直接使用现有依赖实现 HTTP 路由、WS 路由和基础请求校验，不需要先安装数据库、LLM 或音乐相关依赖。
+- `packages/api/src/types.ts` / `ChatRequest`、`ChatResponse`、`NowResponse`、`NextResponse`、`ModelsResponse`、`SwitchModelResponse`、`StreamEvent`：Phase A 所需的主要响应类型已经存在；但 `ChatResponse.play` 当前是 `string[]`，只能表达“推荐歌名”，不能直接承载可播放 `Track` 队列。
+- `packages/api/src/types.ts` / `Track`：`Track` 已有 `id`、`url`、`title`、`artist`、`artwork`、`duration` 字段，足够承载内存电台队列的 mock track 和未来真实音乐 track。
+- `packages/api/src/index.ts` / top-level export：当前只导出契约类型；Phase A 可以先只实现服务端路由，不强制新增 client，避免把 Phase A 和移动端接入 Phase B 混在一起。
+- `packages/core/src/index.ts` / `CORE_VERSION`：core 层仍是占位。Phase A 为了最快打通服务端 API 骨架，内存状态可以先放在 `server/src` 内部；等状态逻辑稳定后再下沉到 `packages/core`。
+
+### 2. 已确认方向
+
+- Phase A 只做服务端，不改移动端 UI；移动端真实调用 API 放到 Phase B。
+- Phase A 只做 mock 主播和 mock 曲目，但必须通过真实 HTTP / WS 路由返回。
+- Phase A 暂不接 LLM、网易云、TTS、SQLite；这些分别留给 Phase C、D、E 和后续持久化任务。
+- 用户已确认 Phase A 风险与决策，并明确允许开始编码。
+
+### 3. 功能点与文件级计划（已确认）
+
+#### 3.1 方案选型
+
+- Phase A 使用现有 `fastify` 模块化注册函数，不引入额外框架、不引入 `fastify-plugin`、不引入数据库、不引入 LLM SDK、不引入音乐服务 SDK。
+- 数据状态先放在服务端内存里，核心路径是常量时间读写：current track、queue、messages、current model、connected stream clients。
+- 校验使用现有 `zod`，只校验请求体和模型切换参数，不做过度 schema 工程。
+- WebSocket 只做广播管道，不做复杂事件总线；Phase A 没有后台任务、没有定时器、没有持久化写入。
+- 所有 mock 都要集中在服务端状态层，不散落在路由里，方便 Phase C/D 替换为 LLM 和真实音乐。
+
+#### 3.2 必做功能
+
+- `GET /api/now`：返回当前内存 track、position 和 state；Phase A 的 position 暂时为 0，state 默认为 `idle` 或由 `/api/chat` 更新。
+- `GET /api/next`：返回队列中的下一首 mock track 和 reason；没有队列时返回内置 fallback track。
+- `POST /api/chat`：接收 `ChatRequest.text`，返回 mock DJ 文案 `ChatResponse`，并把一首 mock track 推入 queue / current track，广播 `chat-token`、`queue-update`、`now-playing`。
+- `GET /api/models`：返回 DeepSeek / Qwen / GLM 三个模型占位信息和当前模型。
+- `POST /api/models/switch`：切换内存 current model，只接受已有模型 id。
+- `WS /stream`：客户端连接后保存到内存 Set；路由事件触发时广播 JSON 字符串形式的 `StreamEvent`。
+
+#### 3.3 明确不做
+
+- 不改 `apps/mobile`，不接移动端真实请求；这是 Phase B。
+- 不改 `packages/ui`，不做任何 UI 视觉调整。
+- 不接 DeepSeek / Qwen / GLM 真实 API；这是 Phase C。
+- 不接网易云搜索、直链解析或真实歌单；这是 Phase D。
+- 不接 TTS，也不生成 mp3 cache；这是 Phase E。
+- 不上 SQLite / Drizzle / cron / scheduler；等 API 闭环稳定后再评估。
+
+#### 3.4 文件级计划
+
+- `server/src/index.ts`：保留 Fastify 创建和 `/health`，新增 `app.register(websocket)`、`registerApiRoutes(app)`、`registerStreamRoutes(app)`；不改变 `start` 的执行载体和监听地址。
+- `server/src/state/radioState.ts`：新增内存电台状态模块，导出模型列表、mock 曲目、获取当前状态、处理 chat、切换模型、获取下一首等纯函数；所有函数写中文多行注释。
+- `server/src/realtime/streamHub.ts`：新增轻量 WS client 集合和 `broadcastStreamEvent` 函数；负责连接、断开和 JSON 广播，避免路由直接管理 Set。
+- `server/src/routes/apiRoutes.ts`：新增 `registerApiRoutes(app)`，实现 `/api/chat`、`/api/now`、`/api/next`、`/api/models`、`/api/models/switch`；请求体用 zod 校验，响应类型从 `@claudio/api` 引入。
+- `server/src/routes/streamRoutes.ts`：新增 `registerStreamRoutes(app)`，实现 `/stream` websocket 路由，并在连接成功后推送一次当前 now-playing 快照。
+- `packages/api/src/types.ts`：Phase A 尽量不改契约；如果实现时发现 `queue-update` 需要允许空队列或 `now-playing` 需要 `track: null`，先回到 Spec 做 Reverse Sync，不直接编码硬改。
+
+#### 3.5 验收计划
+
+- 终端命令：`pnpm.cmd exec tsc --noEmit -p server/tsconfig.json` 必须通过。
+- 终端命令：`pnpm.cmd typecheck` 必须通过，确认共享类型没有破坏其它包。
+- 终端命令：用 PowerShell `Invoke-RestMethod` 验证 `GET /health`、`GET /api/models`、`POST /api/chat`、`GET /api/now`、`GET /api/next`。
+- 终端命令：用 `rg` 验证新增路由存在，且 Phase A 没有引入 `drizzle`、`sqlite`、`cron`、真实 LLM SDK 或 TTS SDK。
+
+### 4. 风险与决策（已确认）
+
+#### 4.1 框架决策
+
+- 继续使用 Fastify。理由是当前仓库已经使用 Fastify，且 Claudio Phase A 的核心需求是低开销 HTTP / WS API、TypeScript、路由模块化、请求校验和后续插件扩展；Fastify 正好覆盖这些核心路径。
+- 不能把“Fastify 是当前最适合 Claudio”说成“Fastify 在所有场景绝对性能第一”。官方 benchmark 也明确说明 hello-world benchmark 只评估框架 overhead，真实性能取决于应用代码，性能重要时必须自己 benchmark。
+- 不切 NestJS。NestJS 的模块化和 DI 更完整，但 Phase A 只需要 5 个 HTTP 路由、1 个 WS 路由和内存状态；引入 Nest 会增加装饰器、生命周期、DI 容器和测试复杂度，不符合敏捷最小闭环。
+- 不切 Express。Express 生态大，但当前阶段没有明显收益；Fastify 已有更好的低开销、schema / serialization 路线和插件封装能力。
+- 不切 Hono / H3 / Bun / Elysia。它们有各自优势，但会带来生态、运行时或迁移成本；当前没有证据显示这些成本能换来 Claudio Phase A 的实际收益。
+
+参考依据：
+- Fastify 官方首页说明其目标是低开销、高开发体验和插件架构，并强调高性能与 TypeScript ready：`https://fastify.dev/`
+- Fastify 官方 benchmark（2026-01-01 更新）显示 Fastify 在 Node 框架 overhead 测试中处于高位，同时提醒真实 overhead 取决于应用代码：`https://fastify.dev/benchmarks/`
+- Fastify 官方文档说明 `register` 可以用于插件化扩展 route / decorator 等能力，适合当前模块化拆分：`https://fastify.dev/docs/latest/Reference/Server/`
+- Fastify validation 文档提醒不要在初始校验里做 async 数据库访问，应在 validation 后的 hook / handler 处理；这支持 Phase A 只做同步 zod 边界校验、不把数据库或远程调用塞进校验层：`https://fastify.dev/docs/v5.6.x/Reference/Validation-and-Serialization/`
+
+#### 4.2 性能风险
+
+- 风险：WS client Set 如果不在 close 时清理，会造成连接泄漏。决策：`streamHub` 必须在 socket close/error 时删除 client。
+- 风险：广播时单个坏连接抛错可能影响其它客户端。决策：广播函数必须逐个 try/catch，坏连接只移除自己。
+- 风险：mock chat 如果未来直接替换为 LLM 调用，可能阻塞 HTTP 响应。决策：Phase A 的 `handleChat` 保持同步内存逻辑；Phase C 接 LLM 时再单独设计超时、fallback 和异步流式策略。
+- 风险：内存状态在进程重启后丢失。决策：Phase A 接受这个限制，因为目标是 API 骨架和调用闭环；持久化不进入本阶段。
+- 风险：`ChatResponse.play` 当前是 `string[]`，与可播放 queue 的 `Track[]` 表达能力不同。决策：Phase A 不改契约，路由内部维护 queue，并通过 `queue-update` stream 推送 `Track[]`；若 Phase B 发现 HTTP 响应必须直接返回 track，再做 Reverse Sync。
+
+#### 4.3 功能边界风险
+
+- 风险：为了“看起来完整”提前接 LLM、网易云、TTS，会再次拖偏主线。决策：Phase A 的验收只看服务端 API 是否真实可请求、状态是否可变、WS 是否可广播。
+- 风险：为了未来扩展提前做数据库 schema、repository、scheduler，会制造偶然复杂度。决策：本阶段只做内存状态和纯函数，等 Phase B/C/D 产生真实数据流后再抽象。
+- 风险：把移动端接入混进 Phase A，会扩大验证面并引入缓存陷阱。决策：Phase A 不改 `apps/mobile` 和 `packages/ui`。
+
+#### 4.4 验收决策
+
+- Phase A 完成后，必须展示终端命令输出证据：server typecheck、workspace typecheck、HTTP 请求返回体、`rg` 反查路由与未引入重依赖。
+- 如果实现中发现需要改 `packages/api/src/types.ts` 契约，必须先暂停并更新本 Spec，再继续编码。
+- HARD-GATE：用户已确认本节“风险与决策”，允许开始 Phase A 编码。

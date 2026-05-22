@@ -368,3 +368,37 @@ pnpm dev:mobile
 - [x] 完成日期：2026-05-22
 - [x] 验证证据：`rg` 已复核当前目标 UI 动画组件不再包含旧 RN `Animated.Value` 长循环；路线已写入 `tasks/spec.md`。
 - [x] 残余说明：路线只是规划，不代表开始编码；真实音频驱动和 APK release 验收都需要单独任务与确认。
+
+## 2026-05-22 主线复位：AI 电台最小闭环
+- [x] 审计当前实际功能：确认后端只有 `/health`，API 只有类型，core 是占位，移动端 DJ 文案和输入回调仍是本地 mock
+- [x] 确认 UI / 动画优化分支不再作为当前主进程
+- [x] 在 `tasks/spec.md` 写入“主线复位 Spec：AI 电台最小闭环”
+- [x] Phase A：后端 API 骨架与内存电台状态
+  - [x] Phase A 现状分析写入 `tasks/spec.md`
+  - [x] 确认 Phase A 现状分析
+  - [x] 写入 Phase A 功能点与文件级计划
+  - [x] 确认 Phase A 功能点与文件级计划
+  - [x] 写入 Phase A 风险与决策
+  - [x] 确认 Phase A 风险与决策
+  - [x] HARD-GATE：用户确认完整 Phase A Spec 后开始编码
+  - [x] 实现内存电台状态模块
+  - [x] 实现 HTTP API 路由
+  - [x] 实现 WebSocket `/stream`
+  - [x] 注册路由并保留 `/health`
+  - [x] 执行 TypeScript、HTTP 请求和依赖边界验证
+- [ ] Phase B：移动端接入服务端 API
+- [ ] Phase C：LLM 主播最小接入
+- [ ] Phase D：音乐来源接入，优先服务端返回真实 `Track`
+- [ ] Phase E：TTS 入声与 `tts-ready` 推送
+- [ ] Phase F：后台播放、锁屏控制、APK release、长时运行等产品化任务
+
+### 2026-05-22 Phase A Review
+- [x] 完成日期：2026-05-22
+- [x] 验证证据：终端命令 `pnpm.cmd exec tsc --noEmit -p server/tsconfig.json` 通过；终端命令 `pnpm.cmd typecheck` 通过；`Invoke-RestMethod` 已验证 `GET /health`、`GET /api/models`、`GET /api/now`、`GET /api/next`、`POST /api/chat`、`POST /api/models/switch`；Node WebSocket 脚本已验证 `/stream` 首包 `queue-update` 以及 `/api/chat` 后广播 `chat-token`、`queue-update`、`now-playing`。
+- [x] 依赖边界：`rg` 已验证 `server/src` 和 `server/package.json` 没有新增 `better-sqlite3`、`node-cron`、`msedge-tts`、`NeteaseCloudMusicApi`、OpenAI / Anthropic SDK 等 Phase C/D/E 重依赖。
+- [x] 残余说明：Phase A 只完成服务端 mock API 与内存状态；移动端仍未调用这些接口，真实 LLM、网易云和 TTS 仍在后续 Phase。
+
+### 2026-05-22 主线复位 Review
+- [x] 完成日期：2026-05-22
+- [x] 验证证据：`rg` 已确认 `server/src/index.ts` 只有 `/health`；`packages/api/src/index.ts` 只导出类型；`packages/core/src/index.ts` 只有占位 `CORE_VERSION`；`apps/mobile/app/index.tsx` 的 `ChatInput` / `DJBubble` 仍未调用真实 API；`apps/mobile/app/_hooks/useRadioPlayer.ts` 使用 SoundHelix mock playlist。
+- [x] 残余说明：本次只复位主线和任务，不写业务代码；下一步从 Phase A 开始，需要单独 Spec / 文件级计划 / HARD-GATE。

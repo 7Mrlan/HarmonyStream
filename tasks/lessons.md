@@ -211,3 +211,19 @@
 **根因**：动画优化容易被误解成“所有组件都必须同时使用两个库”。实际更稳的架构是职责分层：Reanimated 管交互和数值动画，Skia 管高密度绘制，普通 React Native 组件继续管布局和文本，Web 可以用单 canvas fallback。
 **规则**：1. 新增高频动画前先分类：交互/transform/opacity 用 Reanimated；频谱/粒子/尾焰/大量重复图形用 Skia；Web 若不用 Skia，必须用单 canvas fallback。2. React state 只承载业务状态和低频变化，不承载每帧动画值。3. 禁止新增 React Native `Animated.Value` 长循环和 `requestAnimationFrame + setState` 热路径。4. 低频业务计时器可以保留，但必须说明它不是高频视觉动画。
 **关联文件**：`tasks/spec.md`、`packages/ui/src/MusicSpectrum.tsx`、`packages/ui/src/PlaybackProgressBar.tsx`、`packages/ui/src/PlayerControls.tsx`
+
+---
+
+## 2026-05-22 - 主线开发先选对核心架构，不为未来功能提前堆依赖
+**触发**：用户确认 UI 优化差不多后，强调后续搭建尤其框架类方案必须选好；此前没有及时使用 Reanimated + Skia 导致动画效果差、反复优化很久。
+**根因**：如果早期为了“快”选择了不适合高频场景的基础方案，后面会用大量补丁偿还架构债；反过来，如果为了未来想象一次性接入数据库、LLM、音乐、TTS、调度等全套能力，也会拖慢敏捷主线。
+**规则**：1. 每个新阶段先判断“性能最关键的核心路径”并选对承载层，再写业务代码。2. 只做当前闭环必需的功能，不为未来阶段提前引入重依赖。3. Phase A 这类服务端骨架优先使用现有 Fastify / zod / websocket / 内存状态，暂不接数据库、LLM、音乐服务、TTS。4. 每个方案必须明确“不做什么”，防止主线再次被支线功能拖偏。
+**关联文件**：`tasks/spec.md`、`tasks/todo.md`、`server/src/index.ts`
+
+---
+
+## 2026-05-22 - @fastify/websocket 必须先注册插件再挂载 WS 路由
+**触发**：Phase A 验证 `/stream` 时 WebSocket 客户端返回 `Unexpected server response: 500`，普通 HTTP 请求 `/stream` 显示 `socket.once is not a function`。
+**根因**：websocket route 在插件真正进入注册上下文前挂载，handler 被当成普通 HTTP handler 执行，第一个参数变成 Fastify request 而不是 WebSocket socket。
+**规则**：1. `@fastify/websocket` 必须先 `app.register(websocket)`。2. WebSocket route 应放到后续 `app.register(async (routesApp) => { ... })` 的上下文里挂载，保证插件先于路由生效。3. 验证 WS 不能只看 TypeScript，必须用真实 WebSocket 客户端连接并检查首包事件。
+**关联文件**：`server/src/index.ts`、`server/src/routes/streamRoutes.ts`、`server/src/realtime/streamHub.ts`

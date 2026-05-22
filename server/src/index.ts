@@ -7,7 +7,10 @@
  */
 
 import Fastify from 'fastify';
+import websocket from '@fastify/websocket';
 import { env } from './env';
+import { registerApiRoutes } from './routes/apiRoutes';
+import { registerStreamRoutes } from './routes/streamRoutes';
 
 /* 创建 Fastify 实例，pino 日志开发期友好打印 */
 const app = Fastify({
@@ -31,6 +34,16 @@ app.get('/health', async () => {
     version: '0.1.0',
     time: new Date().toISOString(),
   };
+});
+
+/*
+ * 注册 Phase A API 与实时事件通道。
+ * @fastify/websocket 必须先注册，再在后续插件上下文里挂载 websocket route。
+ */
+void app.register(websocket);
+void app.register(async (routesApp) => {
+  registerApiRoutes(routesApp);
+  registerStreamRoutes(routesApp);
 });
 
 /*
