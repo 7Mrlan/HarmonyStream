@@ -703,3 +703,123 @@ ESLint `no-restricted-imports` 强制约束反向依赖。
 - Phase A 完成后，必须展示终端命令输出证据：server typecheck、workspace typecheck、HTTP 请求返回体、`rg` 反查路由与未引入重依赖。
 - 如果实现中发现需要改 `packages/api/src/types.ts` 契约，必须先暂停并更新本 Spec，再继续编码。
 - HARD-GATE：用户已确认本节“风险与决策”，允许开始 Phase A 编码。
+
+---
+
+## 2026-05-22 Phase B：移动端接入服务端 API Spec（已确认并执行完成）
+
+### 1. 现状分析（已确认）
+
+- `packages/api/src/index.ts` / top-level export：当前仍只导出 `types.ts` 契约类型，没有 `createApiClient`、HTTP 请求封装、API base URL 解析或 WebSocket URL 解析；移动端如果现在接 API，只能在页面里散写 `fetch`，这会破坏“接口层集中”的边界。
+- `packages/api/src/types.ts` / `Track`、`ChatRequest`、`ChatResponse`、`NowResponse`、`NextResponse`、`ModelsResponse`、`SwitchModelResponse`、`StreamEvent`：Phase B 需要的共享类型已经覆盖当前服务端 Phase A 路由；但 `ChatResponse.play` 仍只是歌名数组，移动端播放器要拿真实可播放曲目应通过 `/api/now`、`/api/next` 或 `/stream` 的 `Track`。
+- `apps/mobile/app/index.tsx` / `HomeScreen`：主屏仍使用本地 `DJ_SCRIPT` 常量渲染 `DJBubble`；`ChatInput` 的 `onSend` 和 `onMicPress` 仍是空函数；`ConnectionStatus` 固定传入 `connected`，没有反映真实 API / WS 连接状态。
+- `apps/mobile/app/index.tsx` / `HomeScreen`：当前 `TopBar` 的 `modelName` 来自 `DEFAULT_PETS.find((p) => p.id === petId)`；宠物切换只改本地 `petId`，没有调用 `/api/models` 或 `/api/models/switch`，因此模型徽章仍是本地 UI 状态。
+- `apps/mobile/app/_hooks/useRadioPlayer.ts` / `useRadioPlayer`：Hook 支持传入自定义 `playlist` 参数，但 `HomeScreen` 当前没有传入服务端队列；默认仍使用 `DEFAULT_PLAYLIST` 的 SoundHelix mock。Phase B 可以利用这个参数消费服务端 `Track[]`，不用重写播放器控制器。
+- `apps/mobile/app/_hooks/useRadioPlayer.ts` / `RadioTrack`：本地曲目类型字段是 `url`、`title`、`artist`、`durationFallback`；服务端 `Track.duration` 需要映射为 `durationFallback`，否则未加载元数据时进度条没有兜底时长。
+- `packages/ui/src/ChatInput.tsx` / `handleSend`：组件发送后会立刻清空输入，并调用 `onSend(trimmed)`；Phase B 若请求失败，输入已经清空，因此需要在主屏显示错误/离线状态或 DJ 文案反馈，不能靠输入框保留文本提示失败。
+- `packages/ui/src/DJBubble.tsx` / `DJBubble`：组件支持 `text`、`typing`、`live` 和 `onReplay`；Phase B 可以直接把服务端 `ChatResponse.say` 接入，不需要改 UI 组件。
+- `packages/ui/src/ConnectionStatus.tsx` / `ConnectionStatus`：组件已支持 `connected`、`connecting`、`offline` 三态；Phase B 只需要传入真实状态，不需要改 UI 组件。
+- `apps/mobile/app.json` / `android.permissions`：Android 已声明 `INTERNET`，移动端访问本机 / 局域网服务端具备权限；但真机访问 `127.0.0.1:8080` 会指向手机自身，因此 Phase B 必须设计可配置 API base URL。
+- `apps/mobile/package.json` / dependencies：已有 `@claudio/api` 和 `expo-constants`，但 Phase B 不需要新增依赖；可优先用 `process.env.EXPO_PUBLIC_API_BASE_URL` 或 Web 默认 `http://127.0.0.1:8080`。
+
+### 2. 已确认方向
+
+- Phase B 的核心体验目标：在 App 输入框发送文本后，真实调用服务端 `/api/chat`，DJ 气泡显示服务端返回的 `say`，当前曲信息切到服务端返回的 mock 曲目，连接状态能反映请求成功/失败。
+- Phase B 不接真实 LLM、网易云或 TTS；仍消费 Phase A 的 mock 服务端，但必须是移动端真实 HTTP/WS 调用。
+- Phase B 优先 HTTP 闭环，WS 作为连接状态和事件同步通道；如果 WS 在 Web / 真机环境遇到网络差异，不能阻塞 `/api/chat` 的基本体验。
+- Phase B 必须给用户 App 侧验收步骤：终端启动服务端和移动端、浏览器操作发送消息、预期看到 DJ 文案和当前曲变化。
+- 用户已确认 Phase B 现状分析。下一段写“功能点与文件级计划”，然后写“风险与决策”，最后 HARD-GATE 后才能编码。
+
+### 3. 功能点与文件级计划（已确认）
+
+#### 3.1 方案选型
+
+- Phase B 使用 `packages/api` 作为唯一前端通信入口。移动端页面不直接散写 `fetch('http://...')`，而是通过 `createApiClient` 调用 `/api/chat`、`/api/now`、`/api/next`、`/api/models`、`/api/models/switch` 和 `/stream`。
+- Phase B 不新增依赖。`apps/mobile/package.json` 已有 `@claudio/api` 和 `expo-constants`；API 地址优先读取 `process.env.EXPO_PUBLIC_API_BASE_URL`，Web 默认回退到 `http://127.0.0.1:8080`，真机由用户显式传入局域网地址。
+- Phase B 以 HTTP 闭环为主：`ChatInput.onSend` 先调用 `/api/chat`，成功后再拉取 `/api/now` / `/api/next` 更新播放器队列。WebSocket 只负责连接状态和服务端事件同步，不作为首要成功路径。
+- Phase B 继续消费 Phase A mock 服务端，不接真实 LLM、网易云或 TTS；`ChatResponse.play` 仍只展示推荐歌名，真正可播放曲目从 `NowResponse.track`、`NextResponse.track` 或 `queue-update` 事件里的 `Track[]` 获取。
+- Phase B 不改现有 UI 视觉组件。`DJBubble`、`ConnectionStatus`、`NowPlayingBar`、`PlaybackProgressBar`、`PlayerControls`、`PixelPetSwitcher` 只换入真实数据和回调，不做样式调整。
+
+#### 3.2 必做功能
+
+- API client：新增 `createApiClient`，封装 `getNow`、`getNext`、`sendChat`、`getModels`、`switchModel` 和 `connectStream`；所有响应使用 `@claudio/api` 现有契约类型。
+- API URL 解析：新增 HTTP base URL 和 WS URL 解析能力。`http://127.0.0.1:8080` 自动映射为 `ws://127.0.0.1:8080/stream`；`https://` 后续可映射为 `wss://`。
+- 曲目映射：新增服务端 `Track` 到移动端 `RadioTrack` 的映射，字段规则为 `url -> url`、`title -> title`、`artist -> artist`、`duration -> durationFallback`。
+- 主屏初始化：`HomeScreen` 首次加载时调用 `/api/models` 和 `/api/now`。如果服务端已有当前曲，移动端队列立即切到服务端曲目；如果没有当前曲，保留本地播放兜底，不阻塞 UI。
+- 发送消息：`ChatInput.onSend` 调用 `/api/chat`，发送中让 `DJBubble` 进入 `typing` 或“信号接入中”状态；成功后用 `ChatResponse.say` 替换本地 `DJ_SCRIPT`，并通过 `/api/now` / `/api/next` 更新当前曲和队列。
+- 播放器接入：`HomeScreen` 将服务端曲目数组传给 `useRadioPlayer(playlist)`，继续复用现有 `toggle`、`seek`、`next`、`prev`、`stop`，不重写播放控制器。
+- 连接状态：`ConnectionStatus` 改为真实状态。初始化和请求中显示 `connecting`，HTTP 成功或 WS open 后显示 `connected`，请求失败且 WS 不可用时显示 `offline`。
+- WS 同步：`connectStream` 收到 `now-playing` 时更新当前服务端曲目；收到 `queue-update` 时更新队列；收到 `chat-token` 且 `final: true` 时更新 DJ 文案。WS 失败只降级连接状态，不阻塞 HTTP 发送。
+- 模型同步：主屏读取 `/api/models` 的 `current` 和 `available`。`PixelPetSwitcher.onSwitch` 调用 `/api/models/switch`，成功后更新本地 `petId` 和 `TopBar.modelName`；失败时保留原模型并给 DJ 文案或连接状态反馈。
+- 错误反馈：`/api/chat` 失败时，因为 `ChatInput` 已经清空输入，主屏需要把 DJ 文案改为离线/失败提示，并把 `ConnectionStatus` 置为 `offline`，避免用户以为消息已被 Claudio 接收。
+
+#### 3.3 明确不做
+
+- 不改 `packages/ui` 的视觉样式、布局结构、颜色、动画或组件 API，除非实现中发现现有 props 无法承载真实状态并先做 Reverse Sync。
+- 不接 DeepSeek / Qwen / GLM 真实 API；Phase B 只调用 Phase A mock 服务端。
+- 不接网易云搜索、直链解析、真实歌单或真实音频频谱；Phase B 只消费服务端当前返回的 SoundHelix mock `Track`。
+- 不接 TTS、不请求 `voice: true`、不处理 `tts-ready` 播放；这留到 Phase E。
+- 不新增 SQLite、Drizzle、cron、scheduler 或移动端状态库；主屏局部 state 足够完成本阶段闭环。
+- 不做登录鉴权 UI，也不新增真实账号逻辑；`SHARED_TOKEN` 若后续启用，再单独设计移动端配置入口。
+
+#### 3.4 文件级计划
+
+- `packages/api/src/client.ts`：新增轻量 API client。导出 `createApiClient(options)`、`resolveApiBaseUrl`、`resolveStreamUrl`；client 方法包括 `getNow`、`getNext`、`sendChat`、`getModels`、`switchModel`、`connectStream`。所有函数必须写中文多行注释。
+- `packages/api/src/index.ts`：继续导出 `types.ts`，并新增导出 `createApiClient` 与相关 client 类型；不改变现有契约类型名称。
+- `packages/api/src/types.ts`：Phase B 默认不改。若实现时发现 `StreamEvent` 的 `now-playing` 需要允许 `track: null` 或 HTTP 响应需要直接返回 `Track[]`，必须暂停并先更新 Spec。
+- `apps/mobile/app/_config/api.ts`：新增 App 侧 API 配置入口，集中读取 `process.env.EXPO_PUBLIC_API_BASE_URL`，并为 Web 默认提供 `http://127.0.0.1:8080`。真机局域网地址只通过环境变量注入，不硬编码开发机 IP。
+- `apps/mobile/app/_utils/trackMapping.ts`：新增 `mapApiTrackToRadioTrack(track)` 和 `mapApiTracksToRadioTracks(tracks)`，把 `Track.duration` 映射为 `RadioTrack.durationFallback`，过滤 `null` 和缺少 `url` 的曲目。
+- `apps/mobile/app/index.tsx` / `HomeScreen`：移除对本地 `DJ_SCRIPT` 的业务依赖，新增 `djText`、`connectionState`、`serverPlaylist`、`apiClient`、`models` 等局部状态；把 `ChatInput.onSend`、`DJBubble.text`、`ConnectionStatus.state`、`TopBar.modelName`、`PixelPetSwitcher.onSwitch` 接到真实 API 数据。
+- `apps/mobile/app/index.tsx` / `HomeScreen`：继续调用 `useRadioPlayer(serverPlaylist.length > 0 ? serverPlaylist : undefined)`，保留现有播放控件行为；只让曲目来源变成服务端优先、本地兜底。
+- `apps/mobile/app/_hooks/useRadioPlayer.ts`：原则上不改播放控制逻辑。若 `playlist` 从空变非空时出现 `trackIndex` 越界或切歌不同步，再在本文件做最小修正，并先把偏差同步回 Spec。
+- `apps/mobile/app.json`：原则上不改。当前 Android 已有 `INTERNET` 权限，Phase B 不需要新增权限或插件。
+
+#### 3.5 验收计划
+
+- 终端命令：`pnpm.cmd exec tsc --noEmit -p packages/api/tsconfig.json` 必须通过，确认 API client 类型正确。
+- 终端命令：`pnpm.cmd exec tsc --noEmit -p apps/mobile/tsconfig.json` 必须通过，确认 App 接线类型正确。
+- 终端命令：`pnpm.cmd typecheck` 必须通过，确认 monorepo 共享类型没有破坏其它包。
+- 终端命令：`rg "fetch\\(" apps/mobile packages/api`，预期 `apps/mobile` 中不出现散写后端 URL 的直接 `fetch`，HTTP 调用集中在 `packages/api`。
+- 终端命令：`rg "Netease|msedge|openai|anthropic|better-sqlite3|node-cron" apps/mobile packages/api`，预期 Phase B 不新增真实 LLM、网易云、TTS、数据库或调度依赖。
+- App 侧验收步骤必须覆盖：
+  - 终端命令：启动服务端，例如 `pnpm dev:server`，并确认 `http://127.0.0.1:8080/health` 可访问。
+  - 终端命令：启动移动端 Web，例如 `pnpm dev:mobile`，终端出现 Expo 提示后按 `w` 进入 Web。
+  - 浏览器操作：打开移动端页面，在输入框发送 `night drive`。
+  - 预期：DJ 气泡不再显示本地固定 `DJ_SCRIPT`，而是显示服务端返回的“正在接管 Claudio 信号”类文案。
+  - 预期：当前曲标题切换为服务端 mock 曲目之一，如 `Late Night Drive`、`Synthwave Pulse` 或 `Pixel Reverie`。
+  - 预期：连接状态从 `connecting` 回到 `connected`；如果关闭服务端再发送消息，连接状态变为 `offline`，DJ 气泡出现失败提示。
+  - 浏览器操作：涉及 `packages/*` 源码后，如页面仍是旧版，必须先 `Ctrl + Shift + R` 硬刷新；必要时按缓存陷阱三步清 Metro。
+
+### 4. 风险与决策（已确认）
+
+#### 4.1 架构决策
+
+- 决策 1：第三节计划保留，并作为 Phase B 编码边界。它不是冗余文档，而是防止移动端直接散写 `fetch`、硬编码本机 IP、把 WS 当主链路、把 UI 微调混入 API 接入、或提前接真实 LLM / 网易云 / TTS。
+- 决策 2：HTTP client 放在 `packages/api`，App 侧只消费 client。这样 Phase C/D/E 替换服务端实现时，移动端不需要追着多个页面改 URL、请求体和错误处理。
+- 决策 3：App 侧新增 `_config/api.ts` 是必要的。真机不能访问开发机的 `127.0.0.1`，必须把 base URL 配置集中管理；但不把局域网 IP 写进代码，避免提交机器私有配置。
+- 决策 4：先用 `HomeScreen` 局部 state 完成闭环，不引入 zustand 新 store。Phase B 的状态只服务当前主屏，等 Phase C/D 形成多页面或长期状态需求后再抽象。
+- 决策 5：播放器仍以 `useRadioPlayer` 为唯一播放控制器。Phase B 只改变 playlist 来源，不改播放、暂停、seek、上一首、下一首的控制语义。
+- 决策 6：WS 是增强链路，不是硬依赖。只要 `/api/chat`、`/api/now`、`/api/next` 能跑通，Phase B 就具备最小可用体验；WS 失败只能降级连接状态，不能让发送消息不可用。
+
+#### 4.2 功能风险
+
+- 风险：`ChatResponse.play` 只有 `string[]`，不能直接让播放器拿到 `url`。决策：Phase B 不改契约，发送消息成功后再读取 `/api/now` 和 `/api/next`，或消费 `queue-update` 里的 `Track[]`。
+- 风险：服务端刚启动时 `/api/now` 可能返回 `track: null`。决策：移动端保留本地 playlist 兜底；只有拿到有效服务端 `Track.url` 后才切换到服务端队列。
+- 风险：`useRadioPlayer(playlist)` 在 playlist 动态变化时可能保留旧 `trackIndex`。决策：优先不改 Hook；如果实测出现越界或切歌不同步，先 Reverse Sync，再做最小修正。
+- 风险：模型切换既有本地宠物 UI，又有服务端 current model，可能短暂不一致。决策：以服务端 `/api/models` 和 `/api/models/switch` 为权威；切换失败时回滚本地 `petId`。
+- 风险：`ChatInput` 发送后立即清空，失败时用户文本不可恢复。决策：本阶段不改输入框行为，在 DJ 气泡和连接状态里明确反馈失败；如需重试队列，后续单独设计。
+
+#### 4.3 环境风险
+
+- 风险：Web、模拟器、真机访问后端的地址不同。决策：Web 默认 `http://127.0.0.1:8080`；真机必须通过 `EXPO_PUBLIC_API_BASE_URL` 指向开发机局域网 IP；不在代码中猜测或自动扫描网络。
+- 风险：Expo Web 常跑在 `8081` / `8082`，访问后端 `8080` 属于浏览器跨源请求，`POST /api/chat` 会触发 OPTIONS 预检。决策：服务端开发期必须返回最小 CORS 头并处理 OPTIONS，不能只用 PowerShell 请求结果判断前端可用。
+- 风险：涉及 `packages/api` 后，Metro / 浏览器可能复用旧 bundle。决策：验收时默认提醒缓存三步，尤其是 `pnpm dev -- --clear` 和浏览器 `Ctrl + Shift + R`。
+- 风险：WS 在浏览器、Expo Go 或公司网络环境下可能被代理或防火墙影响。决策：WS 只影响实时同步和连接状态，不影响 HTTP 主闭环。
+- 风险：服务端未启动时 App 初始加载会失败。决策：App 显示 `offline`，DJ 气泡给出服务端未连接提示，不崩溃、不白屏。
+
+#### 4.4 验收决策
+
+- Phase B 完成后必须展示开发者侧证据：`packages/api` typecheck、`apps/mobile` typecheck、workspace typecheck、`rg` 验证 App 侧无散写后端 URL、`rg` 验证未引入 Phase C/D/E 依赖。
+- Phase B 完成后必须给用户 App 侧验收步骤，并标明执行载体：终端命令启动服务端、终端命令启动移动端、浏览器操作发送消息、预期 DJ 文案和当前曲变化。
+- 如果编码中发现必须修改 `packages/api/src/types.ts` 契约、`packages/ui` 组件 API 或 `useRadioPlayer` 播放语义，必须先暂停并更新本 Spec，再继续实现。
+- HARD-GATE：用户已确认本节“风险与决策”，允许开始 Phase B 编码。

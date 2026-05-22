@@ -227,3 +227,35 @@
 **根因**：websocket route 在插件真正进入注册上下文前挂载，handler 被当成普通 HTTP handler 执行，第一个参数变成 Fastify request 而不是 WebSocket socket。
 **规则**：1. `@fastify/websocket` 必须先 `app.register(websocket)`。2. WebSocket route 应放到后续 `app.register(async (routesApp) => { ... })` 的上下文里挂载，保证插件先于路由生效。3. 验证 WS 不能只看 TypeScript，必须用真实 WebSocket 客户端连接并检查首包事件。
 **关联文件**：`server/src/index.ts`、`server/src/routes/streamRoutes.ts`、`server/src/realtime/streamHub.ts`
+
+---
+
+## 2026-05-22 - 每次完成后必须给用户可实际体验的验收步骤
+**触发**：用户指出此前 UI 验收基本靠自己发现问题，要求每次完成后如果有可体验内容，必须给出明确验收步骤，避免一直下一步导致后续不知道哪里出问题。
+**根因**：只展示开发者侧验证证据（typecheck、export、rg）不足以形成产品反馈闭环；用户需要知道“我现在能怎么体验、预期看到什么、哪里不对要反馈”。
+**规则**：1. 每个完成项如果有可运行 / 可点击 / 可请求 / 可观察结果，最终回复和 `tasks/todo.md` Review 必须包含“用户验收步骤”。2. 验收步骤必须标明执行载体：`终端命令`、`浏览器操作`、`VSCode 命令面板`、`编辑器界面操作`之一。3. 终端命令必须是真实可运行命令，不能把菜单路径或快捷键写成命令。4. 验收步骤要写预期结果和异常反馈点，让用户能给出真实体验反馈。
+**关联文件**：`tasks/todo.md`、`AGENTS.md`
+
+---
+
+## 2026-05-22 - 上下文窗口切换前必须写清当前断点
+**触发**：用户提醒当前对话窗口快满，需要换窗口或清理，并要求项目进度不能出现断点。
+**根因**：如果只依赖当前对话上下文，换窗口后容易丢失 HARD-GATE 状态、下一步任务和“不准编码”的阶段边界。
+**规则**：1. 换窗口前必须把当前阶段、已确认项、下一步唯一动作写入 `tasks/todo.md`。2. 如果 Spec 分段已确认，要同步把 `tasks/spec.md` 的标题和小节状态从“待确认”改为“已确认”。3. 最终回复必须给出下个窗口可直接粘贴的接续提示，明确先读哪些文件、下一步做什么、哪些事情暂时不能做。
+**关联文件**：`tasks/spec.md`、`tasks/todo.md`
+
+---
+
+## 2026-05-22 - 终端 API 可通不代表 Expo Web 可跨端口调用
+**触发**：用户在 `http://localhost:8082` 前端发送消息后显示“服务端暂时没有回应”，但 PowerShell 直接请求 `http://127.0.0.1:8080/api/models` 正常返回。
+**根因**：浏览器从 `8082` 请求 `8080` 是跨源请求，`POST /api/chat` 会先发 OPTIONS 预检；服务端没有 CORS / OPTIONS 支持时，终端请求能通，浏览器请求仍会被拦截。
+**规则**：1. Web 端接 API 后必须用带 `Origin` 的 OPTIONS 请求验证 CORS，不只用 `Invoke-RestMethod` 验证 GET/POST。2. 开发期服务端至少返回 `Access-Control-Allow-Origin`、`Access-Control-Allow-Methods`、`Access-Control-Allow-Headers` 并处理 OPTIONS。3. 用户截图里出现 offline 时，先区分“后端没启动”“CORS 预检失败”“前端 base URL 错误”三类，不要只看终端 API 是否可通。
+**关联文件**：`server/src/index.ts`、`apps/mobile/app/_config/api.ts`、`packages/api/src/client.ts`
+
+---
+
+## 2026-05-22 - Windows + pnpm hoisted 下子包 dev 脚本不要依赖子包 node_modules 链接
+**触发**：重启服务端时 `pnpm dev:server` 报 `Cannot find module 'D:\code\cloudeMplatform\server\node_modules\tsx\dist\cli.mjs'`。
+**根因**：当前 pnpm hoisted 模式下根目录 `node_modules/tsx` 可用，但 server 子包内的 `node_modules/tsx` 链接在运行时不可用；子包脚本直接执行 `tsx` 会解析到坏链接。
+**规则**：1. 根脚本优先从仓库根执行工具，例如 `pnpm exec tsx watch server/src/index.ts`。2. 子包脚本如必须运行 CLI，可显式指向根 `../node_modules/<tool>/...`，避免依赖子包坏链接。3. 修复启动脚本后必须重新验证实际端口监听和 `/health`，不能只看进程 PID。
+**关联文件**：`package.json`、`server/package.json`

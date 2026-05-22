@@ -24,6 +24,24 @@ const app = Fastify({
 });
 
 /*
+ * 开发期 CORS 支持。
+ * Expo Web 常运行在 8081/8082，而服务端在 8080；浏览器会先发 OPTIONS 预检。
+ * 这里不引入额外依赖，只开放当前 Phase B 需要的 HTTP API 调用头。
+ */
+app.addHook('onRequest', (request, reply, done) => {
+  reply.header('Access-Control-Allow-Origin', '*');
+  reply.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  reply.header('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+
+  if (request.method === 'OPTIONS') {
+    reply.code(204).send();
+    return;
+  }
+
+  done();
+});
+
+/*
  * 健康检查路由
  * 返回服务运行状态、当前时间戳、版本号，方便部署后探活
  */

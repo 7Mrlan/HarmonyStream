@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev:mobile": "pnpm --filter @claudio/mobile dev",
-    "dev:server": "pnpm --filter @claudio/server dev",
+    "dev:server": "pnpm exec tsx watch server/src/index.ts",
     "build": "pnpm -r build",
     "typecheck:api": "tsc --noEmit -p packages/api/tsconfig.json",
     "typecheck:core": "tsc --noEmit -p packages/core/tsconfig.json",

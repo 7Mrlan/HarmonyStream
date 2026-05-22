@@ -386,16 +386,56 @@ pnpm dev:mobile
   - [x] 实现 WebSocket `/stream`
   - [x] 注册路由并保留 `/health`
   - [x] 执行 TypeScript、HTTP 请求和依赖边界验证
-- [ ] Phase B：移动端接入服务端 API
+- [x] Phase B：移动端接入服务端 API
+  - [x] Phase B 现状分析写入 `tasks/spec.md`
+  - [x] 确认 Phase B 现状分析
+  - [x] 写入 Phase B 功能点与文件级计划
+  - [x] 确认 Phase B 功能点与文件级计划
+  - [x] 写入 Phase B 风险与决策
+  - [x] 确认 Phase B 风险与决策
+  - [x] HARD-GATE：用户确认完整 Phase B Spec 后开始编码
+  - [x] 实现 `packages/api` 轻量 HTTP / WS client
+  - [x] 实现移动端 API base URL 配置
+  - [x] 实现服务端 `Track` 到播放器 `RadioTrack` 的映射
+  - [x] 接入 `HomeScreen` 的聊天、当前曲、连接状态和模型切换
+  - [x] 执行 TypeScript、依赖边界和 App 侧验收验证
 - [ ] Phase C：LLM 主播最小接入
 - [ ] Phase D：音乐来源接入，优先服务端返回真实 `Track`
 - [ ] Phase E：TTS 入声与 `tts-ready` 推送
 - [ ] Phase F：后台播放、锁屏控制、APK release、长时运行等产品化任务
 
+### 2026-05-22 Phase B Review
+- [x] 完成日期：2026-05-22
+- [x] 变更范围：`packages/api` 新增轻量 HTTP / WS client；`apps/mobile` 新增 API base URL 配置和 `Track -> RadioTrack` 映射；`HomeScreen` 接入 `/api/chat`、`/api/now`、`/api/next`、`/api/models`、`/api/models/switch` 和 `/stream`。
+- [x] 验证证据：终端命令 `pnpm.cmd exec tsc --noEmit -p packages/api/tsconfig.json` 通过；终端命令 `pnpm.cmd exec tsc --noEmit -p apps/mobile/tsconfig.json` 通过；终端命令 `pnpm.cmd typecheck` 通过；终端命令 `pnpm.cmd --filter @claudio/mobile exec expo export --platform web` 成功导出 Web bundle。
+- [x] 运行验证：本地后端 `http://127.0.0.1:8080/health` 返回 ok；移动端 Web `http://localhost:8081` 返回 200；`/api/models` 返回 DeepSeek、通义千问、智谱 GLM。
+- [x] Web CORS 修复：用户在 `http://localhost:8082` 前端发送消息显示 offline；已确认终端 API 可通但浏览器 OPTIONS 预检 404，已在服务端入口补最小 CORS / OPTIONS 支持。
+- [x] CORS 验证证据：终端命令 `Invoke-WebRequest -Method Options -Uri http://127.0.0.1:8080/api/chat -Headers @{ Origin='http://localhost:8082'; 'Access-Control-Request-Method'='POST'; 'Access-Control-Request-Headers'='content-type' }` 返回 204，且 `Access-Control-Allow-Origin` 为 `*`。
+- [x] 启动脚本修复：`pnpm dev:server` 在当前 Windows + pnpm hoisted 环境中找不到 `server/node_modules/tsx`；已改为根脚本使用 `pnpm exec tsx watch server/src/index.ts`，server 子包脚本显式指向 `../node_modules/tsx/dist/cli.mjs`。
+- [x] 依赖边界：`rg "fetch\\(" apps/mobile` 无命中，移动端没有散写 `fetch`；`rg "Netease|msedge|openai|anthropic|better-sqlite3|node-cron" apps/mobile packages/api` 无命中，Phase B 没有引入真实 LLM、网易云、TTS、数据库或调度依赖。
+- [x] 用户验收步骤：
+  - 终端命令：`pnpm dev:server`
+  - 预期：服务端启动在 `http://127.0.0.1:8080`，访问 `/health` 返回 ok。
+  - 终端命令：`pnpm dev:mobile`
+  - 终端命令窗口操作：Expo 终端出现提示后，在同一个终端窗口按 `w` 启动 Web；这一步不要作为新命令输入。
+  - 浏览器操作：在打开的 App 页面输入 `night drive` 并发送。
+  - 预期：DJ 气泡显示服务端返回的“正在接管 Claudio 信号”类文案；当前曲标题切换到 `Late Night Drive`、`Synthwave Pulse` 或 `Pixel Reverie` 之一；连接状态回到 `CONNECTED`。
+  - 浏览器操作：如果页面仍是旧版，先按 `Ctrl + Shift + R` 硬刷新；仍不生效时按缓存陷阱三步清 Metro。
+- [x] 残余说明：本阶段仍使用 Phase A mock 服务端，不接真实 LLM、网易云或 TTS；WS 是增强链路，HTTP `/api/chat` 是主闭环。
+
 ### 2026-05-22 Phase A Review
 - [x] 完成日期：2026-05-22
 - [x] 验证证据：终端命令 `pnpm.cmd exec tsc --noEmit -p server/tsconfig.json` 通过；终端命令 `pnpm.cmd typecheck` 通过；`Invoke-RestMethod` 已验证 `GET /health`、`GET /api/models`、`GET /api/now`、`GET /api/next`、`POST /api/chat`、`POST /api/models/switch`；Node WebSocket 脚本已验证 `/stream` 首包 `queue-update` 以及 `/api/chat` 后广播 `chat-token`、`queue-update`、`now-playing`。
 - [x] 依赖边界：`rg` 已验证 `server/src` 和 `server/package.json` 没有新增 `better-sqlite3`、`node-cron`、`msedge-tts`、`NeteaseCloudMusicApi`、OpenAI / Anthropic SDK 等 Phase C/D/E 重依赖。
+- [x] 用户验收步骤：
+  - 终端命令：`Invoke-RestMethod http://127.0.0.1:8080/api/models`
+  - 预期：返回 `current` 和 `available`，里面能看到 DeepSeek、通义千问、智谱 GLM。
+  - 终端命令：`Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8080/api/chat -ContentType 'application/json' -Body '{"text":"night drive"}'`
+  - 预期：返回 `say`、`play`、`reason`，`say` 里会说明 Claudio 信号已接管，`play` 里有一首测试曲名。
+  - 终端命令：`Invoke-RestMethod http://127.0.0.1:8080/api/now`
+  - 预期：返回的 `track` 变成刚才 `/api/chat` 选择的测试曲，`state` 为 `playing`。
+  - 终端命令：`node -e "const WebSocket=require('ws'); const ws=new WebSocket('ws://127.0.0.1:8080/stream'); const timeout=setTimeout(()=>{console.error('timeout'); process.exit(1)},4000); ws.on('open',()=>{setTimeout(()=>fetch('http://127.0.0.1:8080/api/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:'broadcast test'})}).catch((err)=>{console.error(err.message); process.exit(1);}),100)}); ws.on('message',(msg)=>{const text=msg.toString(); console.log(text); if(text.includes('now-playing')){clearTimeout(timeout); ws.close();}}); ws.on('error',(err)=>{console.error(err.message); process.exit(1);});"`
+  - 预期：终端打印 `queue-update`、`chat-token`、`now-playing` 三类事件；如果出现 `timeout` 或 `Unexpected server response`，说明 `/stream` 有问题。
 - [x] 残余说明：Phase A 只完成服务端 mock API 与内存状态；移动端仍未调用这些接口，真实 LLM、网易云和 TTS 仍在后续 Phase。
 
 ### 2026-05-22 主线复位 Review

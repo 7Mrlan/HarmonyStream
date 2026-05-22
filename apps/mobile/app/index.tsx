@@ -15,9 +15,10 @@
  * 数据：v1 全部使用 mock，Iter 2 起接入真实播放与对话
  */
 
-import { useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { createApiClient, type ModelInfo, type StreamEvent, type Track } from '@claudio/api';
 import {
   ChatInput,
   ConnectionStatus,
@@ -36,10 +37,12 @@ import {
   UserBubble,
   type PlayerControlAction,
 } from '@claudio/ui';
-import { useRadioPlayer } from './_hooks/useRadioPlayer';
+import { getApiBaseUrl } from './_config/api';
+import { useRadioPlayer, type RadioTrack } from './_hooks/useRadioPlayer';
+import { mapApiTrackToRadioTrack, mapApiTracksToRadioTracks } from './_utils/trackMapping';
 
-/* DJ 文案 mock，模拟 Claudio 的播报风格 */
-const DJ_SCRIPT =
+/* DJ 默认文案：服务端未接入前的首屏提示，不再作为业务响应来源 */
+const DEFAULT_DJ_TEXT =
   "This is Claudio. It's late on a Monday, and here's a song that moves with your breath. " +
   'Back in 1974, David Gates picked up a nylon-string guitar and let every line end in a whisper - ' +
   "you'll feel yourself lift off the ground a little. This one's called If. " +
@@ -50,6 +53,29 @@ const WIDE_BREAKPOINT = 768;
 /* PC 端内容最大宽度，超出留白填补氛围 */
 const CONTENT_MAX_WIDTH = 720;
 
+type ConnectionState = 'connected' | 'connecting' | 'offline';
+
+/*
+ * 生成当前 UI 时间戳。
+ * DJ 气泡只需要轻量展示，不参与服务端协议。
+ */
+function formatBubbleTime(date = new Date()): string {
+  const hours = `${date.getHours()}`.padStart(2, '0');
+  const minutes = `${date.getMinutes()}`.padStart(2, '0');
+  return `${hours}:${minutes}`;
+}
+
+/*
+ * 按模型 id 获取展示名。
+ * 优先使用服务端 `/api/models` 返回值，失败时回退本地宠物配置。
+ */
+function getModelDisplayName(modelId: string, models: ModelInfo[]): string | undefined {
+  return (
+    models.find((model) => model.id === modelId)?.displayName ??
+    DEFAULT_PETS.find((pet) => pet.id === modelId)?.displayName
+  );
+}
+
 export default function HomeScreen() {
   /* 安全区，避免顶部刘海 / 底部 home 条遮挡 */
   const insets = useSafeAreaInsets();
@@ -57,19 +83,194 @@ export default function HomeScreen() {
   const { width: winWidth } = useWindowDimensions();
   const isWide = winWidth >= WIDE_BREAKPOINT;
 
+  /* Claudio API client：集中读取 base URL，页面不散写 fetch 地址 */
+  const apiClient = useMemo(() => createApiClient({ baseUrl: getApiBaseUrl() }), []);
+  /* 服务端模型列表，控制 TopBar 和宠物切换 */
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  /* 服务端曲目队列，非空时覆盖本地 SoundHelix 默认列表 */
+  const [serverPlaylist, setServerPlaylist] = useState<RadioTrack[]>([]);
   /* 真实音频播放引擎：替换 v1 的 mock playing/position */
-  const radio = useRadioPlayer();
+  const radio = useRadioPlayer(serverPlaylist.length > 0 ? serverPlaylist : undefined);
   /* 播放器动画只在真实播放且未结束时运行，暂停/播完进入 idle 收尾态。 */
   const animationActive = radio.playing && !radio.ended;
   const [faved, setFaved] = useState(false);
   const [petId, setPetId] = useState<string>('deepseek');
   const [petAction, setPetAction] = useState<PlayerControlAction | null>(null);
   const [petActionNonce, setPetActionNonce] = useState(0);
+  const [djText, setDjText] = useState(DEFAULT_DJ_TEXT);
+  const [djTime, setDjTime] = useState('21:02');
+  const [djTyping, setDjTyping] = useState(false);
+  const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
+  const currentModelName = getModelDisplayName(petId, models);
 
+  /*
+   * 播放器按钮触发宠物反馈。
+   * actionNonce 用于让同一个动作重复触发动画。
+   */
   function triggerPetAction(action: PlayerControlAction) {
     setPetAction(action);
     setPetActionNonce((value) => value + 1);
   }
+
+  /*
+   * 用服务端曲目刷新播放器队列。
+   * 只接受有 url 的 Track，避免播放器收到不可播放条目。
+   */
+  const applyApiTracks = useCallback((tracks: Array<Track | null | undefined>) => {
+    const mappedTracks = mapApiTracksToRadioTracks(tracks);
+    if (mappedTracks.length > 0) setServerPlaylist(mappedTracks);
+  }, []);
+
+  /*
+   * 刷新当前曲和下一曲。
+   * `/api/chat` 成功后调用，确保播放器拿到真实可播放 Track。
+   */
+  const refreshNowAndNext = useCallback(async () => {
+    const now = await apiClient.getNow();
+    const next = await apiClient.getNext();
+    applyApiTracks([now.track, next.track]);
+  }, [apiClient, applyApiTracks]);
+
+  /*
+   * 处理服务端 WS 事件。
+   * WS 是增强链路，收到事件时同步 DJ 文案、当前曲和队列。
+   */
+  const handleStreamEvent = useCallback(
+    (event: StreamEvent) => {
+      setConnectionState('connected');
+
+      if (event.type === 'chat-token' && event.final) {
+        setDjText(event.text);
+        setDjTime(formatBubbleTime());
+        setDjTyping(false);
+        return;
+      }
+
+      if (event.type === 'now-playing') {
+        const mappedTrack = mapApiTrackToRadioTrack(event.track);
+        if (mappedTrack) {
+          setServerPlaylist((playlist) => [
+            mappedTrack,
+            ...playlist.filter((track) => track.url !== mappedTrack.url),
+          ]);
+        }
+        return;
+      }
+
+      if (event.type === 'queue-update') {
+        applyApiTracks(event.queue);
+      }
+    },
+    [applyApiTracks],
+  );
+
+  useEffect(() => {
+    let disposed = false;
+
+    /*
+     * 初始化服务端状态。
+     * HTTP 成功即可判定主链路可用；WS 失败不会阻塞首屏。
+     */
+    async function bootstrapApiState() {
+      setConnectionState('connecting');
+
+      try {
+        const [modelsResponse, nowResponse] = await Promise.all([
+          apiClient.getModels(),
+          apiClient.getNow(),
+        ]);
+
+        if (disposed) return;
+        setModels(modelsResponse.available);
+        setPetId(modelsResponse.current);
+        applyApiTracks([nowResponse.track]);
+        setConnectionState('connected');
+      } catch {
+        if (disposed) return;
+        setConnectionState('offline');
+        setDjText('Claudio 服务端暂时未连接。请先启动后端，再发送电台信号。');
+        setDjTime(formatBubbleTime());
+      }
+    }
+
+    const subscription = apiClient.connectStream({
+      onOpen: () => {
+        if (!disposed) setConnectionState('connected');
+      },
+      onClose: () => {
+        if (!disposed) setConnectionState((state) => (state === 'connecting' ? 'offline' : state));
+      },
+      onError: () => {
+        if (!disposed) setConnectionState((state) => (state === 'connecting' ? 'offline' : state));
+      },
+      onEvent: (event) => {
+        if (!disposed) handleStreamEvent(event);
+      },
+    });
+
+    void bootstrapApiState();
+
+    return () => {
+      disposed = true;
+      subscription.close();
+    };
+  }, [apiClient, applyApiTracks, handleStreamEvent]);
+
+  /*
+   * 发送用户输入到服务端。
+   * 成功后更新 DJ 文案和播放器曲目；失败时用 DJ 气泡反馈离线状态。
+   */
+  const handleSend = useCallback(
+    async (text: string) => {
+      setConnectionState('connecting');
+      setDjTyping(true);
+      setDjText('Claudio 正在接入服务端信号...');
+      setDjTime(formatBubbleTime());
+
+      try {
+        const response = await apiClient.sendChat({ text });
+        setDjText(response.say);
+        setDjTime(formatBubbleTime());
+        setDjTyping(false);
+        setConnectionState('connected');
+        await refreshNowAndNext();
+      } catch {
+        setDjText('Claudio 服务端暂时没有回应。请确认后端已启动，然后再发一次信号。');
+        setDjTime(formatBubbleTime());
+        setDjTyping(false);
+        setConnectionState('offline');
+      }
+    },
+    [apiClient, refreshNowAndNext],
+  );
+
+  /*
+   * 切换服务端模型。
+   * 服务端是权威来源；失败时回滚本地宠物 id。
+   */
+  const handlePetSwitch = useCallback(
+    async (nextId: string) => {
+      const previousId = petId;
+      setPetId(nextId);
+      setConnectionState('connecting');
+
+      try {
+        const switchResult = await apiClient.switchModel(nextId);
+        if (!switchResult.ok) throw new Error('模型切换失败');
+
+        const modelsResponse = await apiClient.getModels();
+        setModels(modelsResponse.available);
+        setPetId(modelsResponse.current);
+        setConnectionState('connected');
+      } catch {
+        setPetId(previousId);
+        setConnectionState('offline');
+        setDjText('模型切换失败。Claudio 已保留当前模型，等服务端恢复后再试。');
+        setDjTime(formatBubbleTime());
+      }
+    },
+    [apiClient, petId],
+  );
 
   return (
     <View className="flex-1 bg-bg">
@@ -93,7 +294,7 @@ export default function HomeScreen() {
           }}
         >
           {/* 顶部状态栏（带 AI 模型徽章，避免右下角宠物名遮挡正文） */}
-          <TopBar modelName={DEFAULT_PETS.find((p) => p.id === petId)?.displayName} />
+          <TopBar modelName={currentModelName} />
 
           {/* 时钟 + 日期 + ON AIR */}
           <View className="items-center pt-4 pb-6 px-4">
@@ -145,7 +346,7 @@ export default function HomeScreen() {
           />
 
           {/* DJ 长文气泡 */}
-          <DJBubble text={DJ_SCRIPT} time="21:02" live onReplay={() => undefined} />
+          <DJBubble text={djText} time={djTime} live typing={djTyping} onReplay={() => undefined} />
 
           {/* 用户短回复气泡 */}
           <UserBubble text="好听" name="MMGUO" time="21:09" />
@@ -163,8 +364,8 @@ export default function HomeScreen() {
             maxWidth: isWide ? CONTENT_MAX_WIDTH : undefined,
           }}
         >
-          <ChatInput onSend={() => undefined} onMicPress={() => undefined} />
-          <ConnectionStatus state="connected" />
+          <ChatInput onSend={handleSend} onMicPress={() => undefined} />
+          <ConnectionStatus state={connectionState} />
         </View>
       </View>
 
@@ -181,7 +382,7 @@ export default function HomeScreen() {
           currentId={petId}
           action={petAction}
           actionNonce={petActionNonce}
-          onSwitch={setPetId}
+          onSwitch={handlePetSwitch}
           onLongPress={() => undefined}
         />
       </View>
