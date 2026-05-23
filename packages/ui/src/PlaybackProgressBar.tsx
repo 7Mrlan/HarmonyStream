@@ -20,7 +20,7 @@ import Animated, {
   withTiming,
   type SharedValue,
 } from 'react-native-reanimated';
-import Svg, { Defs, G, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
+import Svg, { Defs, G, LinearGradient, Rect, Stop } from 'react-native-svg';
 
 export interface PlaybackProgressBarProps {
   /* 当前播放位置（秒） */
@@ -65,10 +65,10 @@ interface SparkSeed {
   opacity: number;
 }
 
-const TRACK_HEIGHT = 42;
-const TRACK_TOP = 8;
+const TRACK_HEIGHT = 60;
+const TRACK_TOP = 4;
 const TRACK_PADDING = 4;
-const OUTER_HEIGHT = 58;
+const OUTER_HEIGHT = 68;
 const SHIP_WIDTH = 52;
 const SHIP_HEIGHT = 28;
 const FLAME_CENTER_Y = SHIP_HEIGHT / 2 - 2;

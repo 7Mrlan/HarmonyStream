@@ -2,11 +2,11 @@
  * 组件：MusicSpectrum
  * ------------------
  * 作用：
- *   - Native 端：使用 Skia 承接 48 根频谱柱与 LED cap 的高频绘制
- *   - Web 端：保留无 CanvasKit 依赖的 Animated + SVG 降级实现
+ *   - Native 端：使用 Skia 承接 48 根频谱柱与 LED cap 的高频绘制。
+ *   - Web 端：使用单 HTML canvas fallback，避免 48 组 React / SVG 节点逐帧更新。
  * 说明：
- *   - 两条路径保持同一套 48 柱 / noise / wave / 中心衰减 / cap 下落参数
- *   - Native 优先解决长期运行卡顿，Web 保持当前演示链路可用
+ *   - 两条路径保持同一套 48 柱 / noise / wave / 中心衰减 / cap 下落参数。
+ *   - explame.html 只作为视觉参数来源；当前实现按项目平台框架映射，不照搬 DOM 结构。
  */
 
 import { createElement, useEffect, useRef, useState } from 'react';
@@ -51,10 +51,17 @@ const BAR_DECAY_SPEED = 0.15;
 const BAR_IDLE_DECAY_SPEED = 0.45;
 const BAR_MIN_RISE_IMPULSE = 4.5;
 const NATIVE_CANVAS_IDLE_UNMOUNT_DELAY = 1200;
+const BAR_BOTTOM_COLOR = '#001a0f';
+const BAR_MID_COLOR = '#006644';
+const BAR_SHADOW_COLOR = 'rgba(0, 255, 157, 0.2)';
+const BAR_SHADOW_BLUR = 15;
+const CAP_COLOR = '#ffffff';
+const CAP_WHITE_SHADOW_BLUR = 12;
+const CAP_GREEN_SHADOW_BLUR = 20;
 
 let cachedSkiaModule: SkiaModule | null | undefined;
 
-/* 工具：Native 端按需加载 Skia，避免 Web 演示链路硬依赖 CanvasKit。 */
+/* 工具：Native 端按需加载 Skia；Web 端保持轻量 canvas fallback，不加载 CanvasKit。 */
 function getSkiaModule(): SkiaModule | null {
   if (Platform.OS === 'web') {
     return null;
@@ -62,6 +69,7 @@ function getSkiaModule(): SkiaModule | null {
   if (cachedSkiaModule !== undefined) {
     return cachedSkiaModule;
   }
+  /* eslint-disable-next-line @typescript-eslint/no-var-requires */
   cachedSkiaModule = require('@shopify/react-native-skia') as SkiaModule;
   return cachedSkiaModule;
 }
@@ -92,6 +100,58 @@ function resolveBarLevel(current: number, target: number, active: boolean): numb
   return current + Math.max(easedRise, impulseRise);
 }
 
+/* 工具：按 explame.html 的 `.v-bar` 三段线性渐变创建 Web 频谱柱填充。 */
+function createWebBarGradient(
+  context: CanvasRenderingContext2D,
+  height: number,
+  color: string,
+): CanvasGradient {
+  const gradient = context.createLinearGradient(0, height, 0, 0);
+  gradient.addColorStop(0, BAR_BOTTOM_COLOR);
+  gradient.addColorStop(0.4, BAR_MID_COLOR);
+  gradient.addColorStop(1, color);
+  return gradient;
+}
+
+/* 工具：Web 频谱柱只绘制一次，阴影参数直接对应 `.v-bar` 的 box-shadow。 */
+function drawWebBar(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  barHeight: number,
+  height: number,
+  color: string,
+): void {
+  context.save();
+  context.shadowColor = BAR_SHADOW_COLOR;
+  context.shadowBlur = BAR_SHADOW_BLUR;
+  context.fillStyle = createWebBarGradient(context, height, color);
+  context.fillRect(x, y, width, barHeight);
+  context.restore();
+}
+
+/* 工具：Web cap 用两次阴影绘制对应 `.v-cap` 的白光与绿光双重 box-shadow。 */
+function drawWebCap(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  color: string,
+  opacity: number,
+): void {
+  context.save();
+  context.globalAlpha = opacity;
+  context.shadowColor = CAP_COLOR;
+  context.shadowBlur = CAP_WHITE_SHADOW_BLUR;
+  context.fillStyle = CAP_COLOR;
+  context.fillRect(x, y, width, CAP_HEIGHT);
+  context.shadowColor = color;
+  context.shadowBlur = CAP_GREEN_SHADOW_BLUR;
+  context.fillRect(x, y, width, CAP_HEIGHT);
+  context.restore();
+}
+
 /* 子组件：单根 Skia 频谱柱，内部自持高度与 cap 状态，避免 React 重渲染。 */
 function NativeSpectrumBar({
   skia,
@@ -110,7 +170,7 @@ function NativeSpectrumBar({
   clock: SharedValue<number>;
   activeLevel: SharedValue<number>;
 }) {
-  const { LinearGradient: SkiaLinearGradient, RoundedRect: SkiaRoundedRect, vec } = skia;
+  const { LinearGradient: SkiaLinearGradient, RoundedRect: SkiaRoundedRect, Shadow: SkiaShadow, vec } = skia;
   const entrance = useSharedValue(0);
   const barLevel = useSharedValue(0);
   const capLevel = useSharedValue(0);
@@ -161,10 +221,12 @@ function NativeSpectrumBar({
   return (
     <>
       <SkiaRoundedRect x={x} y={barY} width={barWidth} height={barHeight} r={2}>
+        <SkiaShadow dx={0} dy={0} blur={BAR_SHADOW_BLUR} color={BAR_SHADOW_COLOR} />
         <SkiaLinearGradient
           start={vec(x, height)}
           end={vec(x, 0)}
-          colors={['#001a0f', '#006644', color]}
+          colors={[BAR_BOTTOM_COLOR, BAR_MID_COLOR, color]}
+          positions={[0, 0.4, 1]}
         />
       </SkiaRoundedRect>
       <SkiaRoundedRect
@@ -175,7 +237,10 @@ function NativeSpectrumBar({
         r={1}
         color="#ffffff"
         opacity={capOpacity}
-      />
+      >
+        <SkiaShadow dx={0} dy={0} blur={CAP_WHITE_SHADOW_BLUR} color={CAP_COLOR} />
+        <SkiaShadow dx={0} dy={0} blur={CAP_GREEN_SHADOW_BLUR} color={color} />
+      </SkiaRoundedRect>
     </>
   );
 }
@@ -229,8 +294,6 @@ function NativeMusicSpectrum({
 
   /* 播放 / 暂停切换只改 activeLevel，Skia 节点在 UI 线程继续插值。 */
   useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-
     if (active) {
       setRenderCanvas(true);
       activeLevel.value = withTiming(1, {
@@ -248,12 +311,10 @@ function NativeMusicSpectrum({
      * 暂停后视觉先快速落下，但不要立刻卸载 Skia Canvas。
      * 这样可以吸收用户快速暂停/播放的连续点击，避免反复重建 48 根 Skia 节点造成卡顿。
      */
-    timer = setTimeout(() => setRenderCanvas(false), NATIVE_CANVAS_IDLE_UNMOUNT_DELAY);
+    const timer = setTimeout(() => setRenderCanvas(false), NATIVE_CANVAS_IDLE_UNMOUNT_DELAY);
 
     return () => {
-      if (timer) {
-        clearTimeout(timer);
-      }
+      clearTimeout(timer);
     };
   }, [active, activeLevel]);
 
@@ -287,7 +348,7 @@ function NativeMusicSpectrum({
   );
 }
 
-/* 子组件：Web 端降级频谱，沿用现有 Animated + SVG 路径，避免 CanvasKit 依赖。 */
+/* 子组件：Web 端使用单 canvas 绘制，避免 CanvasKit 加载成本和大量 SVG 节点。 */
 function WebMusicSpectrum({
   active,
   height = DEFAULT_HEIGHT,
@@ -301,7 +362,7 @@ function WebMusicSpectrum({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const entranceStartRef = useRef<number | null>(null);
 
-  /* Web 降级使用单 canvas 绘制，避免 48 个 Animated/SVG 节点长期占用 JS。 */
+  /* Web 降级使用单 canvas 绘制，避免 48 个 React / SVG 节点长期占用 JS。 */
   useEffect(() => {
     const canvas = canvasRef.current;
     const maybeContext = canvas?.getContext('2d');
@@ -324,6 +385,7 @@ function WebMusicSpectrum({
       entranceStartRef.current = null;
     }
 
+    /* Web 单帧更新：计算目标高度、cap 下落和入场缓动，并在静止后停止 RAF。 */
     function updateVisualizer() {
       const frequencies = frequenciesRef.current;
       const capPositions = capPositionsRef.current;
@@ -366,18 +428,10 @@ function WebMusicSpectrum({
         const capBottom = Math.max(0, ((capPositions[index] ?? 0) / 100) * height * easedEntrance);
         const x = index * (barWidth + BAR_GAP);
         const y = height - barHeight;
+        const capY = height - capBottom - CAP_HEIGHT - CAP_TOP_OFFSET;
 
-        const gradient = context.createLinearGradient(0, height, 0, 0);
-        gradient.addColorStop(0, '#001a0f');
-        gradient.addColorStop(0.4, '#006644');
-        gradient.addColorStop(1, color);
-        context.fillStyle = gradient;
-        context.fillRect(x, y, barWidth, barHeight);
-
-        context.globalAlpha = active ? 1 : 0.3;
-        context.fillStyle = '#ffffff';
-        context.fillRect(x, height - capBottom - CAP_HEIGHT - CAP_TOP_OFFSET, barWidth, CAP_HEIGHT);
-        context.globalAlpha = 1;
+        drawWebBar(context, x, y, barWidth, barHeight, height, color);
+        drawWebCap(context, x, capY, barWidth, color, active ? 1 : 0.3);
 
         maxMovingValue = Math.max(maxMovingValue, nextFrequency, capPositions[index] ?? 0);
       });
@@ -432,6 +486,7 @@ function WebMusicSpectrum({
   );
 }
 
+/* 导出组件：按平台分流到 Native Skia 或 Web canvas 实现。 */
 export function MusicSpectrum(props: MusicSpectrumProps) {
   if (Platform.OS === 'web') {
     return <WebMusicSpectrum {...props} />;

@@ -99,7 +99,7 @@ export default function HomeScreen() {
   const [petActionNonce, setPetActionNonce] = useState(0);
   const [djText, setDjText] = useState(DEFAULT_DJ_TEXT);
   const [djTime, setDjTime] = useState('21:02');
-  const [djTyping, setDjTyping] = useState(false);
+  const [djLoading, setDjLoading] = useState(false);
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
   const currentModelName = getModelDisplayName(petId, models);
 
@@ -142,7 +142,7 @@ export default function HomeScreen() {
       if (event.type === 'chat-token' && event.final) {
         setDjText(event.text);
         setDjTime(formatBubbleTime());
-        setDjTyping(false);
+        setDjLoading(false);
         return;
       }
 
@@ -223,21 +223,20 @@ export default function HomeScreen() {
   const handleSend = useCallback(
     async (text: string) => {
       setConnectionState('connecting');
-      setDjTyping(true);
-      setDjText('Claudio 正在接入服务端信号...');
+      setDjLoading(true);
       setDjTime(formatBubbleTime());
 
       try {
         const response = await apiClient.sendChat({ text });
         setDjText(response.say);
         setDjTime(formatBubbleTime());
-        setDjTyping(false);
+        setDjLoading(false);
         setConnectionState('connected');
         await refreshNowAndNext();
       } catch {
         setDjText('Claudio 服务端暂时没有回应。请确认后端已启动，然后再发一次信号。');
         setDjTime(formatBubbleTime());
-        setDjTyping(false);
+        setDjLoading(false);
         setConnectionState('offline');
       }
     },
@@ -346,7 +345,7 @@ export default function HomeScreen() {
           />
 
           {/* DJ 长文气泡 */}
-          <DJBubble text={djText} time={djTime} live typing={djTyping} onReplay={() => undefined} />
+          <DJBubble text={djText} time={djTime} live loading={djLoading} onReplay={() => undefined} />
 
           {/* 用户短回复气泡 */}
           <UserBubble text="好听" name="MMGUO" time="21:09" />

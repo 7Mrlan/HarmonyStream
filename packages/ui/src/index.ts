@@ -41,6 +41,9 @@ export type { PetAction, PixelPetSwitcherProps, PetMeta } from './PixelPetSwitch
 export { PlayerControls } from './PlayerControls';
 export type { PlayerControlAction, PlayerControlsProps } from './PlayerControls';
 
+export { RadioTuningLoader } from './RadioTuningLoader';
+export type { RadioTuningLoaderProps } from './RadioTuningLoader';
+
 export { TopBar } from './TopBar';
 export type { TopBarProps } from './TopBar';
 

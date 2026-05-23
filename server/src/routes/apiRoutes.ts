@@ -80,7 +80,7 @@ export function registerApiRoutes(app: FastifyInstance): void {
     }
 
     const chatRequest: ChatRequest = parsed.data;
-    const result = handleChat(chatRequest);
+    const result = await handleChat(chatRequest);
 
     broadcastStreamEvent({
       type: 'chat-token',

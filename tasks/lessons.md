@@ -259,3 +259,27 @@
 **根因**：当前 pnpm hoisted 模式下根目录 `node_modules/tsx` 可用，但 server 子包内的 `node_modules/tsx` 链接在运行时不可用；子包脚本直接执行 `tsx` 会解析到坏链接。
 **规则**：1. 根脚本优先从仓库根执行工具，例如 `pnpm exec tsx watch server/src/index.ts`。2. 子包脚本如必须运行 CLI，可显式指向根 `../node_modules/<tool>/...`，避免依赖子包坏链接。3. 修复启动脚本后必须重新验证实际端口监听和 `/health`，不能只看进程 PID。
 **关联文件**：`package.json`、`server/package.json`
+
+---
+
+## 2026-05-23 - 参考 HTML/CSS 的视觉参数必须先做精确映射
+
+**触发**：用户提供 `explame/explame.html` 作为音频条原始参考，但上一轮调整没有严格按 `.v-bar` / `.v-cap` 的渐变和光影参数映射，而是额外叠加了顶部近白高光和更宽 glow 层。
+
+**根因**：把“增强光感”理解成主观加层，而不是先从参考文件提取参数并在当前 Canvas / Skia 框架中做等价实现。
+
+**规则**：有参考 HTML/CSS 时，先列出关键视觉参数（颜色 stop、透明度、shadow blur、cap 尺寸、动画公式），再做框架映射；除非用户明确要求强化，否则不要新增参考里没有的额外视觉层。实现要用必要 helper 封装映射，避免堆叠冗余绘制代码。
+
+**关联文件**：`explame/explame.html`、`packages/ui/src/MusicSpectrum.tsx`
+
+---
+
+## 2026-05-23 - 性能实现说明不能沿用旧架构措辞
+
+**触发**：用户追问频谱是否用了 Reanimated + Skia，以及“今天最开始改动前没有用 canvas 时怎么实现”，暴露 `MusicSpectrum` 文件里还残留 Animated / SVG 旧实现描述，容易误导对当前性能路径的判断。
+
+**根因**：代码已从旧 Animated / SVG 热路径迁到 Native Skia + Web 单 canvas fallback，但注释没有随实现一起更新；旧架构词汇留在高频动画组件里，会让后续排查性能时方向跑偏。
+
+**规则**：性能敏感组件改架构后，必须同步更新文件头、fallback 注释和关键 helper 注释；描述当前实现时只写真实运行路径，不用“历史上曾经怎么做”的词。若需要保留历史信息，只能放在任务记录或 lessons 中。
+
+**关联文件**：`packages/ui/src/MusicSpectrum.tsx`

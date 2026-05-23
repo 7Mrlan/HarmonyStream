@@ -17,6 +17,7 @@ import Animated, {
   withRepeat,
   withTiming,
 } from 'react-native-reanimated';
+import { RadioTuningLoader } from './RadioTuningLoader';
 
 export interface DJBubbleProps {
   /* 主体文本，可多段落 */
@@ -29,6 +30,8 @@ export interface DJBubbleProps {
   live?: boolean;
   /* 打字机效果：true 时按字符逐个出现，速度由 typingSpeedMs 控制 */
   typing?: boolean;
+  /* LLM 等待态：true 时显示电台调频加载组件，不显示本地垫话 */
+  loading?: boolean;
   /* 每个字符的间隔毫秒 */
   typingSpeedMs?: number;
   /* 头像方块的颜色，默认 panel */
@@ -90,18 +93,32 @@ function useLiveBlink(active: boolean) {
   }));
 }
 
+/*
+ * 工具：按 DJ 气泡正文区域计算调频模块宽度。
+ * 宽屏限制为小仪表，窄屏保持可读但不超过正文区域。
+ */
+function resolveTuningLoaderWidth(contentWidth: number): number | undefined {
+  if (contentWidth <= 0) return undefined;
+
+  const preferredWidth = Math.max(208, contentWidth * 0.72);
+  return Math.min(contentWidth, 280, preferredWidth);
+}
+
 export function DJBubble({
   text,
   name = 'CLAUDIO',
   time,
   live = false,
   typing = false,
+  loading = false,
   typingSpeedMs = 20,
   avatarColor = '#0a0a0a',
   onReplay,
 }: DJBubbleProps) {
-  const display = useTypewriter(text, typing, typingSpeedMs);
+  const display = useTypewriter(text, typing && !loading, typingSpeedMs);
   const liveDotStyle = useLiveBlink(live);
+  const [contentWidth, setContentWidth] = useState(0);
+  const tuningLoaderWidth = resolveTuningLoaderWidth(contentWidth);
 
   return (
     <View className="flex-row px-4 py-3" style={{ gap: 12 }}>
@@ -112,7 +129,15 @@ export function DJBubble({
       />
 
       {/* 右侧主体 */}
-      <View className="flex-1">
+      <View
+        className="flex-1"
+        onLayout={(event) => {
+          const measuredWidth = event.nativeEvent.layout.width;
+          if (Math.abs(measuredWidth - contentWidth) > 0.5) {
+            setContentWidth(measuredWidth);
+          }
+        }}
+      >
         {/* 顶部一行：DJ 名 + LIVE 标签 */}
         <View className="flex-row items-center" style={{ gap: 8 }}>
           <Text className="font-pixel text-text text-base tracking-pixel">{name}</Text>
@@ -139,12 +164,18 @@ export function DJBubble({
           ) : null}
         </View>
 
-        {/* 主文本 */}
-        <View className="mt-2 border border-line bg-panel px-3 py-2">
-          <Text className="font-mono text-text text-base" style={{ lineHeight: 22 }}>
-            {display}
-          </Text>
-        </View>
+        {/* 主文本或 LLM 等待态 */}
+        {loading ? (
+          <View className="mt-2">
+            <RadioTuningLoader active width={tuningLoaderWidth} />
+          </View>
+        ) : (
+          <View className="mt-2 border border-line bg-panel px-3 py-2">
+            <Text className="font-mono text-text text-base" style={{ lineHeight: 22 }}>
+              {display}
+            </Text>
+          </View>
+        )}
 
         {/* 底部一行：时间 + REPLAY 按钮 */}
         <View className="flex-row items-center mt-1" style={{ gap: 8 }}>

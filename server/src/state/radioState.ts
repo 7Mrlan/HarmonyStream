@@ -16,6 +16,7 @@ import type {
   SwitchModelResponse,
   Track,
 } from '@claudio/api';
+import { generateDjResponse } from '../llm/llmAdapter';
 
 type RadioPlaybackState = NowResponse['state'];
 
@@ -148,17 +149,25 @@ export function getNextTrack(): NextResponse {
 
 /*
  * 处理用户聊天请求。
- * 当前生成可控 mock DJ 文案，并推进内存播放状态，为 Phase B 移动端接入提供真实 HTTP 行为。
+ * Phase C 优先调用 LLM 生成主播文案；任何配置缺失、超时或解析失败都回退 mock。
+ * 状态只在最终文案确定后一次性提交，避免半更新的脏状态。
  */
-export function handleChat(request: ChatRequest): ChatResult {
+export async function handleChat(request: ChatRequest): Promise<ChatResult> {
   const text = request.text.trim();
   const selectedTrack = selectTrackForText(text);
-  const response: ChatResponse = {
-    say: buildMockDjScript(text, selectedTrack),
-    play: [selectedTrack.title],
-    reason: `根据“${text || '今晚随便听点'}”选择一首适合夜间像素电台氛围的测试曲。`,
-    segue: '信号已接入，Claudio 先为你推上一首安全可播放的 demo track。',
-  };
+  const currentModel = getCurrentModel();
+  const generated = await generateDjResponse({
+    userText: text,
+    modelId: currentModel.id,
+    modelDisplayName: currentModel.displayName,
+    playbackState: radioState.playbackState,
+    currentTrack: radioState.currentTrack,
+    selectedTrack,
+    candidateTracks: MOCK_TRACKS.map(cloneTrack),
+  });
+  const response = generated.ok
+    ? generated.response
+    : buildFallbackChatResponse(text, selectedTrack, generated.reason);
 
   radioState.currentTrack = selectedTrack;
   radioState.playbackState = 'playing';
@@ -202,6 +211,40 @@ function buildMockDjScript(text: string, track: Track): string {
   const model = MODELS.find((item) => item.id === radioState.currentModel)?.displayName ?? 'Claudio';
 
   return `${model} 正在接管 Claudio 信号。你说“${prompt}”，我先用一首 ${track.title} 把电台链路打通。真正的 AI 主播和网易云选曲会在后续阶段接入。`;
+}
+
+/*
+ * 构建 fallback ChatResponse。
+ * fallback 仍返回完整契约，确保 HTTP 和 WS 消费方不需要区分真实 LLM 与 mock。
+ */
+function buildFallbackChatResponse(
+  text: string,
+  track: Track,
+  fallbackReason?: string,
+): ChatResponse {
+  const reason = `根据“${text || '今晚随便听点'}”选择一首适合夜间像素电台氛围的测试曲。`;
+
+  return {
+    say: buildMockDjScript(text, track),
+    play: [track.title],
+    reason: fallbackReason ? `${reason} LLM fallback：${fallbackReason}。` : reason,
+    segue: '信号已接入，Claudio 先为你推上一首安全可播放的 demo track。',
+  };
+}
+
+/*
+ * 获取当前模型信息。
+ * 服务端内存状态是模型选择权威来源；找不到时回退默认模型，避免坏状态击穿 LLM adapter。
+ */
+function getCurrentModel(): ModelInfo {
+  return (
+    MODELS.find((item) => item.id === radioState.currentModel) ??
+    MODELS.find((item) => item.id === DEFAULT_MODEL_ID) ?? {
+      id: DEFAULT_MODEL_ID,
+      displayName: 'DeepSeek',
+      petSprite: 'deepseek',
+    }
+  );
 }
 
 /*
