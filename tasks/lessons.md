@@ -29,7 +29,41 @@
 
 **规则**：1. 任何“运行 / 重启 / 打开 / 点击”类步骤，先标明执行载体：终端、VSCode 命令面板、编辑器界面或浏览器。2. 不能在 shell 直接执行的 IDE 动作，必须明确写成“按 `Ctrl + Shift + P` 后执行”，并显式提醒“不要在终端输入”。3. 给用户复制命令前，先确认该命令在当前 shell 中真实可运行；如果只是菜单路径、快捷键或 UI 操作，必须改成步骤描述。
 
-**关联文件**：`AGENTS.md`、`tasks/lessons.md`
+---
+
+## 2026-05-23 - env schema 不要把 HTTP 超时上限套用到所有正整数
+
+**触发**：Phase D.5 把 `MUSIC_CACHE_DEFAULT_TTL_MS` 默认 300000 通过 `positiveIntegerWithDefault` 注入，启动时 zod 抛 `Number must be less than or equal to 30000`。
+
+**根因**：`positiveIntegerWithDefault` 当初是为 LLM / provider HTTP 超时写的，硬编码 `max(30000)` 防止请求挂死；缓存 TTL、LRU 上限不属于 HTTP 超时类，复用同一个工厂会被强制限到 30 秒。
+
+**规则**：1. env helper 的语义边界写在函数名里：HTTP 类用 `positiveIntegerWithDefault`（默认上限 30s），其它正整数用 `positiveIntegerWithMax(default, max)` 显式传入合理上限。2. 引入新配置项前，先想清楚它的物理量纲（毫秒超时 / 毫秒 TTL / 计数 / 字节数），别套用现成 helper 后再撞上 zod 校验。3. 启动失败的 zod 报错要立刻读字段名而不是改 schema 的 max；改 schema 时同步在 `.env.example` 注释写出量纲与上限。
+
+**关联文件**：[server/src/env.ts](file:///d:/code/cloudeMplatform/server/src/env.ts)、[server/.env.example](file:///d:/code/cloudeMplatform/server/.env.example)
+
+---
+
+## 2026-05-23 - nvm-windows 切版本必须真接管 `C:\Program Files\nodejs`
+
+**触发**：Phase E 装 `msedge-tts` 后服务端报 `crypto is not defined`，原因是 Node 18 没有全局 webcrypto。`nvm install 22.12.0 && nvm use 22.12.0` 显示 "Now using v22.12.0" 但 `node -v` 仍输出 `v18.20.5`，反复多次无效。
+
+**根因**：电脑上有一份 Node.js MSI 安装器装的独立 Node 18，路径 `C:\Program Files\nodejs` 是**真实文件夹**（`(Get-Item).LinkType` 为空），物理占据了 nvm-windows 必须接管的 symlink 位置。`nvm use` 在普通 PowerShell 创建 symlink 失败时只静默返回，但表面输出"成功"，导致用户看不到真实错误。
+
+**规则**：1. 任何"切版本不生效"先看 `(Get-Item 'C:\Program Files\nodejs').LinkType`：为空 → MSI 装的真实文件夹，不是 nvm symlink，必须先卸载。2. nvm-windows 的 `nvm use` 必须**管理员 PowerShell**才能成功创建 symlink；普通终端会静默失败。3. Windows 开发环境常见两套 Node 并存：MSI 一套 + nvm 一套。修复路径：开始菜单"添加或删除程序"卸载独立 Node → 检查 `C:\Program Files\nodejs` 残留并手动删除 → 管理员 PowerShell `nvm install 18.20.5 && nvm use 22.12.0` → 验证 `node -v`。4. Node 18 与 19 之间的 webcrypto 边界：用 `import { webcrypto } from 'node:crypto'` + `globalThis.crypto = webcrypto` 兼容层是合法做法，不是补丁；Node 19+ 自带，注入前要做 `if (!target.crypto)` 守护避免覆盖。
+
+**关联文件**：[server/src/tts/providers/edgeProvider.ts](file:///d:/code/cloudeMplatform/server/src/tts/providers/edgeProvider.ts)
+
+---
+
+## 2026-05-23 - 临时调试文件必须在排障结束当下立刻清理
+
+**触发**：Phase E 排查 TTS 失败时新建了 `server/scripts/debug-ws.ts` 用于订阅 WS 抓 `tts-ready` 广播。问题定位修复后转入下一段编码，忘记删除该文件，由用户提醒才清理。
+
+**根因**：上下文切换时只关注"主线下一步做什么"，没有把"清理本次为排障引入的临时资产"作为收尾步骤；用户之前因为 cancel 删除拒绝过我自动删，但那次是验证还在进行中——我没有重新评估"现在是否到了能删的节点"。
+
+**规则**：1. 每次为排障 / 临时验证新增的脚本、临时 .env 行、`console.log` 临时埋点，**在该次排障的根因被锁死并修复完毕的同一个 turn 内**主动清理或主动询问。2. 临时资产必须在文件首行注释明确写"临时 / 完成 X 后删除"；命名加 `debug-` / `temp-` 前缀。3. 用户拒绝删除一次不等于永远拒绝，每次进度推进都要重新评估清理时机；不能默认"既然之前用户保留了我就一直保留"。4. 进入新阶段（如 Phase E → Phase F）前，把所有临时文件作为收尾清单的固定一项。
+
+**关联文件**：曾存在于 `server/scripts/debug-ws.ts`（已删除）
 
 ---
 

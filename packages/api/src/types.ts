@@ -7,13 +7,28 @@
 
 /* ========== 基础实体 ========== */
 
+export type TrackSourceTier = 'owned' | 'external' | 'experimental' | 'fallback';
+
+export type TrackCachePolicy = 'owned' | 'metadata-only' | 'no-cache';
+
+export interface TrackSourceInfo {
+  /* 音源 provider id，仅用于调试、缓存和预加载策略，不参与播放器渲染。 */
+  provider: string;
+  /* 音源能力层级：自有源可完整优化，外部源只能短缓存。 */
+  tier: TrackSourceTier;
+  /* 该曲目允许的缓存策略，由服务端 provider 声明。 */
+  cachePolicy: TrackCachePolicy;
+}
+
 export interface Track {
   id: string;
-  url: string; // 直链或本地路径
+  url: string; // 直链、相对媒体路径或远程 URL
   title: string;
   artist?: string;
   artwork?: string; // https url，512×512+
   duration?: number; // 秒
+  source?: TrackSourceInfo;
+  expiresAt?: string;
 }
 
 /* ========== POST /api/chat ========== */

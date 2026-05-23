@@ -3,17 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>极客音频控制台 - 现代重塑版</title>
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;500;700&family=Press+Start+2P&display=swap" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+    <title>Pixel AI Radio Tuning</title>
     <style>
         :root {
-            --bg-color: #020406;
-            --neon-green: #00ff9d;
-            --neon-glow: rgba(0, 255, 157, 0.6);
-            --glass-bg: rgba(255, 255, 255, 0.03);
-            --glass-border: rgba(255, 255, 255, 0.15);
-            --text-main: #e0e0e0;
+            --bg-color: #000000;
+            --primary-color: #00ff88;
+            --secondary-color: #1f1f1f;
+            --accent-color: #ff3355;
+            --text-color: #e8e8e8;
+            --pixel-size: 2px;
         }
 
         body, html {
@@ -23,434 +21,174 @@
             height: 100%;
             background-color: var(--bg-color);
             display: flex;
-            justify-content: center;
-            align-items: center;
-            overflow: hidden;
-            font-family: 'Noto Sans SC', sans-serif;
-            color: var(--text-main);
-        }
-
-        #app-container {
-            position: relative;
-            width: 1200px;
-            height: 700px;
-            display: flex;
             flex-direction: column;
-            justify-content: center;
             align-items: center;
-            background: radial-gradient(circle at 50% 40%, #0a1512 0%, #020406 100%);
+            justify-content: center;
             overflow: hidden;
+            font-family: 'Courier New', Courier, monospace;
         }
 
-        /* 装饰性背景 */
+        .container {
+            position: relative;
+            width: 280px;
+            height: 88px;
+            background: var(--bg-color);
+            border: 2px solid var(--secondary-color);
+            image-rendering: pixelated;
+        }
+
+        /* 像素风背景网格 */
         .grid-bg {
             position: absolute;
-            width: 200%;
-            height: 200%;
+            inset: 0;
             background-image: 
-                linear-gradient(rgba(0, 255, 157, 0.05) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(0, 255, 157, 0.05) 1px, transparent 1px);
-            background-size: 60px 60px;
-            transform: perspective(500px) rotateX(60deg) translateY(-200px);
-            z-index: 1;
+                linear-gradient(var(--secondary-color) 1px, transparent 1px),
+                linear-gradient(90deg, var(--secondary-color) 1px, transparent 1px);
+            background-size: 8px 8px;
             opacity: 0.3;
         }
 
-        .info-panel {
-            text-align: center;
-            margin-bottom: 80px;
-            z-index: 10;
+        /* 信号扫描线 */
+        @keyframes scanline {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(300%); }
         }
 
-        .song-title {
-            font-family: 'Press Start 2P', cursive;
-            color: var(--neon-green);
-            font-size: 28px;
-            margin-bottom: 15px;
-            letter-spacing: 2px;
-            text-shadow: 0 0 20px var(--neon-glow);
+        /* 频率指针移动 */
+        @keyframes needleMove {
+            0%, 100% { transform: translateX(20px); }
+            50% { transform: translateX(240px); }
         }
 
-        .artist-name {
-            font-size: 14px;
-            color: rgba(255, 255, 255, 0.4);
-            letter-spacing: 6px;
+        /* 信号波跳动 */
+        @keyframes waveJump {
+            0%, 100% { transform: scaleY(0.2); }
+            50% { transform: scaleY(1.2); }
+        }
+
+        /* 故障闪烁 */
+        @keyframes glitch {
+            0% { opacity: 1; }
+            95% { opacity: 1; }
+            96% { opacity: 0; }
+            97% { opacity: 1; }
+            99% { opacity: 0.2; }
+            100% { opacity: 1; }
+        }
+
+        /* 文字呼吸 */
+        @keyframes blink {
+            0%, 49% { opacity: 1; }
+            50%, 100% { opacity: 0; }
+        }
+
+        .label {
+            position: absolute;
+            bottom: 6px;
+            right: 10px;
+            color: var(--text-color);
+            font-size: 10px;
+            letter-spacing: 1px;
             text-transform: uppercase;
         }
 
-        /* 音频可视化容器 */
-        .visualizer-container {
-            position: absolute;
-            bottom: 220px;
-            width: 900px;
-            height: 200px;
-            display: flex;
-            align-items: flex-end;
-            justify-content: center;
-            gap: 6px;
-            z-index: 5;
-        }
-
-        .v-bar-wrapper {
-            flex: 1;
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-            justify-content: flex-end;
-            position: relative;
-        }
-
-        /* 音频柱：高对比度线性渐变 */
-        .v-bar {
-            width: 100%;
-            background: linear-gradient(to top, 
-                #001a0f 0%, 
-                #006644 40%, 
-                var(--neon-green) 100%);
-            border-radius: 2px;
-            position: relative;
-            box-shadow: 0 0 15px rgba(0, 255, 157, 0.2);
-        }
-
-        /* LED过载发光块 */
-        .v-cap {
-            position: absolute;
-            top: -6px;
-            left: 0;
-            width: 100%;
-            height: 4px;
-            background: #fff;
-            box-shadow: 0 0 12px 2px #fff, 0 0 20px var(--neon-green);
-            border-radius: 1px;
-            z-index: 6;
-        }
-
-        /* 毛玻璃控制面板 */
-        .controls-wrapper {
-            display: flex;
-            gap: 40px;
-            align-items: center;
-            z-index: 20;
-            padding: 25px 50px;
-            background: var(--glass-bg);
-            backdrop-filter: blur(15px);
-            -webkit-backdrop-filter: blur(15px);
-            border: 1px solid var(--glass-border);
-            border-radius: 100px;
-            box-shadow: 
-                0 10px 40px rgba(0, 0, 0, 0.5),
-                0 0 0 1px rgba(255, 255, 255, 0.05) inset;
-        }
-
-        .btn-container {
-            position: relative;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
-
-        .glass-btn {
-            cursor: pointer;
-            background: transparent;
-            border: none;
-            outline: none;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-            position: relative;
-        }
-
-        /* 弥散阴影 */
-        .btn-shadow {
-            position: absolute;
-            width: 100%;
-            height: 100%;
-            background: var(--neon-glow);
-            filter: blur(25px);
-            opacity: 0;
-            transition: opacity 0.3s;
-            pointer-events: none;
-        }
-
-        .glass-btn:hover .btn-shadow {
-            opacity: 0.4;
-        }
-
-        .glass-btn:active {
-            transform: scale(0.92);
-        }
-
-        /* 激活时的波纹 */
-        .ripple {
-            position: absolute;
-            border: 2px solid var(--neon-green);
-            border-radius: 50%;
-            pointer-events: none;
-            opacity: 0;
-        }
-
-        .status-bar {
-            position: absolute;
-            bottom: 40px;
-            font-size: 12px;
-            color: rgba(255, 255, 255, 0.3);
-            letter-spacing: 2px;
-            z-index: 10;
-        }
-
-        svg {
-            filter: drop-shadow(0 2px 5px rgba(0,0,0,0.5));
+        .cursor {
+            display: inline-block;
+            width: 6px;
+            height: 10px;
+            background: var(--primary-color);
+            animation: blink 0.6s infinite;
+            vertical-align: middle;
+            margin-left: 4px;
         }
     </style>
 </head>
 <body>
 
-<div id="app-container">
-    <div class="grid-bg"></div>
+    <!-- 主体：像素调频模块 -->
+    <div class="container">
+        <div class="grid-bg"></div>
+        
+        <svg width="280" height="88" viewBox="0 0 280 88" xmlns="http://www.w3.org/2000/svg" style="animation: glitch 3s infinite;">
+            <!-- 刻度线 -->
+            <g stroke="var(--secondary-color)" stroke-width="2">
+                <line x1="20" y1="20" x2="260" y2="20" />
+                <line x1="20" y1="20" x2="20" y2="30" />
+                <line x1="80" y1="20" x2="80" y2="26" />
+                <line x1="140" y1="20" x2="140" y2="30" />
+                <line x1="200" y1="20" x2="200" y2="26" />
+                <line x1="260" y1="20" x2="260" y2="30" />
+            </g>
 
-    <div class="info-panel">
-        <div class="song-title" id="song-name">NEON_PULSE.EXE</div>
-        <div class="artist-name" id="artist-name">数字艺术家 // 2024 核心架构</div>
+            <!-- 信号频率波 (像素块形态) -->
+            <g transform="translate(40, 45)">
+                <rect x="0" y="0" width="4" height="20" fill="var(--primary-color)">
+                    <animate attributeName="height" values="4;18;4" dur="0.6s" repeatCount="indefinite" />
+                </rect>
+                <rect x="8" y="5" width="4" height="10" fill="var(--primary-color)">
+                    <animate attributeName="height" values="10;22;10" dur="0.7s" repeatCount="indefinite" />
+                </rect>
+                <rect x="16" y="2" width="4" height="15" fill="var(--primary-color)">
+                    <animate attributeName="height" values="15;8;15" dur="0.5s" repeatCount="indefinite" />
+                </rect>
+                <rect x="24" y="8" width="4" height="12" fill="var(--primary-color)">
+                    <animate attributeName="height" values="6;20;6" dur="0.8s" repeatCount="indefinite" />
+                </rect>
+                <rect x="32" y="4" width="4" height="18" fill="var(--primary-color)">
+                    <animate attributeName="height" values="18;4;18" dur="0.4s" repeatCount="indefinite" />
+                </rect>
+                <!-- 静态底线 -->
+                <line x1="-20" y1="25" x2="220" y2="25" stroke="var(--secondary-color)" stroke-width="1" />
+            </g>
+
+            <!-- 调频扫描指针 -->
+            <g id="needle">
+                <rect width="2" height="16" fill="var(--accent-color)" x="0" y="15" />
+                <rect width="6" height="6" fill="var(--accent-color)" x="-2" y="12" />
+                <animateTransform attributeName="transform" type="translate" from="20 0" to="260 0" dur="1.8s" repeatCount="indefinite" />
+            </g>
+
+            <!-- 锁定信号框 -->
+            <g transform="translate(180, 42)">
+                <path d="M0 0 H8 V4 H0 Z M12 0 H20 V4 H12 Z M0 12 H8 V16 H0 Z M12 12 H20 V16 H12 Z" fill="var(--secondary-color)">
+                    <animate attributeName="fill" values="#1f1f1f;#00ff88;#1f1f1f" dur="1.2s" repeatCount="indefinite" />
+                </path>
+                <rect x="8" y="6" width="4" height="4" fill="var(--accent-color)">
+                    <animate attributeName="opacity" values="1;0;1" dur="0.4s" repeatCount="indefinite" />
+                </rect>
+            </g>
+
+            <!-- 顶部状态文字 -->
+            <text x="20" y="12" fill="var(--primary-color)" font-size="8px" font-weight="bold" letter-spacing="1">FM 99.7 AI_SIGNAL</text>
+        </svg>
+
+        <div class="label">正在调频<span class="cursor"></span></div>
     </div>
 
-    <!-- 频谱可视化 -->
-    <div class="visualizer-container" id="visualizer"></div>
-
-    <div class="controls-wrapper">
-        <!-- 上一首 -->
-        <div class="btn-container">
-            <div class="btn-shadow"></div>
-            <button class="glass-btn" id="btn-prev" title="上一首">
-                <svg width="40" height="40" viewBox="0 0 40 40">
-                    <path d="M28 10 L28 30 L16 20 Z" fill="white" />
-                    <path d="M16 10 L16 30 L4 20 Z" fill="white" />
-                    <rect x="32" y="10" width="3" height="20" fill="white" opacity="0.5" />
-                </svg>
-            </button>
+    <!-- 变体说明容器 (仅用于展示) -->
+    <div style="margin-top: 40px; display: flex; gap: 20px;">
+        <!-- 变体A：老式收音机调频感 -->
+        <div style="width: 120px; height: 40px; border: 1px solid #1f1f1f; position: relative; overflow: hidden; background: #000;">
+            <div style="position: absolute; top: 10px; left: 0; width: 100%; height: 1px; background: #1f1f1f;"></div>
+            <div style="position: absolute; top: 5px; left: 10%; width: 2px; height: 10px; background: #ff3355; animation: needleMove 2s infinite linear;"></div>
+            <div style="position: absolute; bottom: 5px; left: 5px; font-size: 8px; color: #00ff88; font-family: monospace;">TUNING...</div>
         </div>
 
-        <!-- 播放/暂停 -->
-        <div class="btn-container">
-            <div class="btn-shadow" style="filter: blur(35px);"></div>
-            <button class="glass-btn" id="btn-play-pause" style="transform: scale(1.2);">
-                <svg width="80" height="80" viewBox="0 0 80 80">
-                    <circle cx="40" cy="40" r="38" fill="none" stroke="white" stroke-width="1" opacity="0.3" />
-                    <g id="icon-play">
-                        <path d="M33 25 L55 40 L33 55 Z" fill="white" />
-                    </g>
-                    <g id="icon-pause" style="opacity: 0;">
-                        <rect x="30" y="25" width="6" height="30" fill="white" />
-                        <rect x="44" y="25" width="6" height="30" fill="white" />
-                    </g>
-                </svg>
-            </button>
-        </div>
-
-        <!-- 下一首 -->
-        <div class="btn-container">
-            <div class="btn-shadow"></div>
-            <button class="glass-btn" id="btn-next" title="下一首">
-                <svg width="40" height="40" viewBox="0 0 40 40">
-                    <path d="M12 10 L12 30 L24 20 Z" fill="white" />
-                    <path d="M24 10 L24 30 L36 20 Z" fill="white" />
-                    <rect x="5" y="10" width="3" height="20" fill="white" opacity="0.5" />
-                </svg>
-            </button>
+        <!-- 变体B：赛博终端信号锁定 -->
+        <div style="width: 120px; height: 40px; border: 1px solid #1f1f1f; position: relative; background: #000; display: flex; align-items: center; justify-content: center; gap: 3px;">
+            <div style="width: 4px; height: 10px; background: #00ff88; animation: waveJump 0.3s infinite;"></div>
+            <div style="width: 4px; height: 16px; background: #00ff88; animation: waveJump 0.4s infinite;"></div>
+            <div style="width: 4px; height: 8px; background: #00ff88; animation: waveJump 0.5s infinite;"></div>
+            <div style="position: absolute; top: 2px; right: 2px; font-size: 6px; color: #e8e8e8;">SYNC_LOCK</div>
         </div>
     </div>
 
-    <div class="status-bar" id="status-msg">系统就绪 // 等待指令...</div>
-</div>
-
-<script>
-    const state = {
-        isPlaying: false,
-        currentTrack: 0,
-        tracks: [
-            { name: "NEON_PULSE.EXE", artist: "数字艺术家 // 2024 核心架构" },
-            { name: "CYBER_DREAM.SYS", artist: "合成波协议 // 节点 07" },
-            { name: "VOID_RUNNER.LOG", artist: "虚空行者 // 深度采样" },
-            { name: "BIT_STORM.WAV", artist: "比特风暴 // 最终序列" }
-        ]
-    };
-
-    const visualizer = document.getElementById('visualizer');
-    const btnPlayPause = document.getElementById('btn-play-pause');
-    const btnPrev = document.getElementById('btn-prev');
-    const btnNext = document.getElementById('btn-next');
-    const iconPlay = document.getElementById('icon-play');
-    const iconPause = document.getElementById('icon-pause');
-    const statusMsg = document.getElementById('status-msg');
-    const songName = document.getElementById('song-name');
-    const artistName = document.getElementById('artist-name');
-
-    // 初始化音频条
-    const barCount = 48;
-    const bars = [];
-    const caps = [];
-    
-    for (let i = 0; i < barCount; i++) {
-        const wrapper = document.createElement('div');
-        wrapper.className = 'v-bar-wrapper';
-        
-        const bar = document.createElement('div');
-        bar.className = 'v-bar';
-        
-        const cap = document.createElement('div');
-        cap.className = 'v-cap';
-        
-        wrapper.appendChild(cap);
-        wrapper.appendChild(bar);
-        visualizer.appendChild(wrapper);
-        
-        bars.push(bar);
-        caps.push(cap);
-    }
-
-    let frequencies = new Array(barCount).fill(0);
-    let capPositions = new Array(barCount).fill(0);
-
-    function updateVisualizer() {
-        bars.forEach((bar, i) => {
-            let target;
-            if (state.isPlaying) {
-                // 模拟具有爆发力的音频节奏
-                const noise = Math.random();
-                const wave = Math.sin(Date.now() * 0.005 + i * 0.2) * 20;
-                target = 20 + (noise * 70) + wave;
-                // 边缘衰减
-                const distFromCenter = Math.abs(i - barCount/2) / (barCount/2);
-                target *= (1 - distFromCenter * 0.6);
-            } else {
-                target = 5;
-            }
-
-            // 弹性缓动算法 (Elastic Easing Logic)
-            const diff = target - frequencies[i];
-            if (diff > 0) {
-                // 上升爆发
-                frequencies[i] += diff * 0.3;
-            } else {
-                // 下落阻尼
-                frequencies[i] += diff * 0.15;
-            }
-
-            bar.style.height = `${frequencies[i]}%`;
-            
-            // LED Cap 逻辑：重力阻尼下落
-            if (frequencies[i] > capPositions[i]) {
-                capPositions[i] = frequencies[i];
-            } else {
-                capPositions[i] -= 0.8; // 模拟重力
-            }
-            if (capPositions[i] < 0) capPositions[i] = 0;
-            
-            caps[i].style.bottom = `${capPositions[i]}%`;
-            caps[i].style.opacity = state.isPlaying ? 1 : 0.3;
+    <script>
+        // 保持单次循环逻辑，由于是纯CSS/SVG动画，此处仅用于确保首帧渲染同步
+        window.addEventListener('DOMContentLoaded', () => {
+            console.log("Radio Tuning Module Active...");
         });
-
-        requestAnimationFrame(updateVisualizer);
-    }
-
-    function createRipple(element) {
-        const ripple = document.createElement('div');
-        ripple.className = 'ripple';
-        const rect = element.getBoundingClientRect();
-        const size = Math.max(rect.width, rect.height) * 2;
-        
-        ripple.style.width = ripple.style.height = `${size}px`;
-        ripple.style.left = `50%`;
-        ripple.style.top = `50%`;
-        ripple.style.transform = `translate(-50%, -50%) scale(0)`;
-        
-        element.parentElement.appendChild(ripple);
-
-        gsap.to(ripple, {
-            scale: 1.5,
-            opacity: 0,
-            duration: 0.6,
-            ease: "power2.out",
-            onComplete: () => ripple.remove()
-        });
-    }
-
-    function togglePlay() {
-        state.isPlaying = !state.isPlaying;
-        createRipple(btnPlayPause);
-
-        if (state.isPlaying) {
-            gsap.to(iconPlay, { opacity: 0, scale: 0.5, duration: 0.3, ease: "back.in(2)" });
-            gsap.to(iconPause, { opacity: 1, scale: 1, duration: 0.3, ease: "back.out(2)" });
-            statusMsg.innerText = "音频流同步中 // 实时输出";
-            
-            // 按钮呼吸感
-            gsap.to(btnPlayPause, {
-                boxShadow: "0 0 30px var(--neon-glow)",
-                repeat: -1,
-                yoyo: true,
-                duration: 0.8
-            });
-        } else {
-            gsap.to(iconPause, { opacity: 0, scale: 0.5, duration: 0.3, ease: "back.in(2)" });
-            gsap.to(iconPlay, { opacity: 1, scale: 1, duration: 0.3, ease: "back.out(2)" });
-            statusMsg.innerText = "系统挂起 // 待机模式";
-            gsap.killTweensOf(btnPlayPause);
-        }
-    }
-
-    function changeTrack(dir) {
-        createRipple(dir === 'next' ? btnNext : btnPrev);
-        
-        state.currentTrack = dir === 'next' 
-            ? (state.currentTrack + 1) % state.tracks.length 
-            : (state.currentTrack - 1 + state.tracks.length) % state.tracks.length;
-
-        const track = state.tracks[state.currentTrack];
-        
-        // 切换动画
-        gsap.to(".info-panel", {
-            filter: "blur(10px)",
-            opacity: 0,
-            x: dir === 'next' ? -20 : 20,
-            duration: 0.3,
-            onComplete: () => {
-                songName.innerText = track.name;
-                artistName.innerText = track.artist;
-                gsap.fromTo(".info-panel", 
-                    { x: dir === 'next' ? 20 : -20, filter: "blur(10px)", opacity: 0 },
-                    { x: 0, filter: "blur(0px)", opacity: 1, duration: 0.5, ease: "elastic.out(1, 0.75)" }
-                );
-            }
-        });
-
-        statusMsg.innerText = dir === 'next' ? "载入下一序列..." : "回溯上一序列...";
-    }
-
-    // 事件监听
-    btnPlayPause.addEventListener('click', togglePlay);
-    btnNext.addEventListener('click', () => changeTrack('next'));
-    btnPrev.addEventListener('click', () => changeTrack('prev'));
-
-    // 启动
-    updateVisualizer();
-
-    // 入场动画
-    window.onload = () => {
-        gsap.from(".controls-wrapper", {
-            y: 100,
-            opacity: 0,
-            duration: 1.2,
-            ease: "expo.out"
-        });
-        gsap.from(".v-bar-wrapper", {
-            scaleY: 0,
-            opacity: 0,
-            duration: 1,
-            stagger: 0.02,
-            ease: "power4.out"
-        });
-    };
-</script>
+    </script>
 </body>
+
 </html>

@@ -15,7 +15,7 @@
  * 数据：v1 全部使用 mock，Iter 2 起接入真实播放与对话
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { createApiClient, type ModelInfo, type StreamEvent, type Track } from '@claudio/api';
@@ -34,11 +34,13 @@ import {
   PlaybackProgressBar,
   PlayerControls,
   TopBar,
+  TrackArtworkPanel,
   UserBubble,
   type PlayerControlAction,
 } from '@claudio/ui';
 import { getApiBaseUrl } from './_config/api';
 import { useRadioPlayer, type RadioTrack } from './_hooks/useRadioPlayer';
+import { useTtsPlayer } from './_hooks/useTtsPlayer';
 import { mapApiTrackToRadioTrack, mapApiTracksToRadioTracks } from './_utils/trackMapping';
 
 /* DJ 默认文案：服务端未接入前的首屏提示，不再作为业务响应来源 */
@@ -91,6 +93,17 @@ export default function HomeScreen() {
   const [serverPlaylist, setServerPlaylist] = useState<RadioTrack[]>([]);
   /* 真实音频播放引擎：替换 v1 的 mock playing/position */
   const radio = useRadioPlayer(serverPlaylist.length > 0 ? serverPlaylist : undefined);
+  /* Phase E：独立 TTS 播放器；与 radio 完全隔离，避免 DJ 一开口就打断当前歌曲 */
+  const tts = useTtsPlayer();
+  /*
+   * tts 对象引用在 useTtsPlayer 内每次渲染都会变化（playing 状态切换会触发新对象）。
+   * handleStreamEvent / bootstrap useEffect 不能直接依赖 tts，否则每次状态变化都会重连 WS、重新拉 /api/now+models，
+   * 引发"每秒几十个请求"的死循环。这里用 ref 把 tts 锁住，事件处理读 ref.current 即可。
+   */
+  const ttsRef = useRef(tts);
+  useEffect(() => {
+    ttsRef.current = tts;
+  }, [tts]);
   /* 播放器动画只在真实播放且未结束时运行，暂停/播完进入 idle 收尾态。 */
   const animationActive = radio.playing && !radio.ended;
   const [faved, setFaved] = useState(false);
@@ -101,7 +114,23 @@ export default function HomeScreen() {
   const [djTime, setDjTime] = useState('21:02');
   const [djLoading, setDjLoading] = useState(false);
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
+  const [failedArtworkUrl, setFailedArtworkUrl] = useState<string | null>(null);
+  /* Phase E：voice 开关；默认关闭，避免首次启动突然出声。点击 ChatInput 旁的喇叭切换。 */
+  const [ttsEnabled, setTtsEnabled] = useState(false);
+  /* 最近一次收到的 tts-ready URL，DJBubble onReplay 用它再次触发播放。 */
+  const [lastTtsUrl, setLastTtsUrl] = useState<string | null>(null);
   const currentModelName = getModelDisplayName(petId, models);
+  const artworkUrl = radio.track.artwork;
+  const showTrackArtwork = Boolean(artworkUrl && failedArtworkUrl !== artworkUrl);
+  const artworkPanelSize = isWide ? 260 : 220;
+
+  /*
+   * 封面加载失败时切回原时钟占位。
+   * 失败 URL 单独记录，避免同一首歌内反复请求坏图。
+   */
+  const handleArtworkError = useCallback(() => {
+    if (artworkUrl) setFailedArtworkUrl(artworkUrl);
+  }, [artworkUrl]);
 
   /*
    * 播放器按钮触发宠物反馈。
@@ -132,6 +161,35 @@ export default function HomeScreen() {
   }, [apiClient, applyApiTracks]);
 
   /*
+   * 同一首歌只触发一次预热：用 ref 记录已经发起预热的 track url。
+   * 进度达到 60% 或剩余时间不足 45 秒时调用 /api/next，让服务端有机会预热下一首。
+   */
+  const preloadedTrackUrlRef = useRef<string | null>(null);
+  useEffect(() => {
+    preloadedTrackUrlRef.current = null;
+  }, [radio.track.url]);
+  useEffect(() => {
+    if (!radio.playing) return;
+    if (radio.duration <= 0) return;
+    if (preloadedTrackUrlRef.current === radio.track.url) return;
+
+    const ratio = radio.position / radio.duration;
+    const remaining = radio.duration - radio.position;
+    const shouldPreload = ratio >= 0.6 || remaining <= 45;
+    if (!shouldPreload) return;
+
+    preloadedTrackUrlRef.current = radio.track.url;
+    apiClient
+      .getNext()
+      .then((next) => {
+        applyApiTracks([next.track]);
+      })
+      .catch(() => {
+        /* 预热失败不影响当前播放，静默处理。 */
+      });
+  }, [apiClient, applyApiTracks, radio.duration, radio.playing, radio.position, radio.track.url]);
+
+  /*
    * 处理服务端 WS 事件。
    * WS 是增强链路，收到事件时同步 DJ 文案、当前曲和队列。
    */
@@ -159,6 +217,18 @@ export default function HomeScreen() {
 
       if (event.type === 'queue-update') {
         applyApiTracks(event.queue);
+      }
+
+      if (event.type === 'tts-ready') {
+        /*
+         * Phase E：tts-ready 收到 url 后立即播放。
+         * 服务端可能给绝对 URL 或相对路径，相对路径需要拼上 baseUrl。
+         * 使用 ttsRef 避免把 tts 加进 useCallback 依赖，否则会拖累 bootstrap useEffect 反复重连。
+         */
+        const baseUrl = getApiBaseUrl();
+        const fullUrl = /^https?:\/\//i.test(event.url) ? event.url : `${baseUrl}${event.url}`;
+        setLastTtsUrl(fullUrl);
+        ttsRef.current.play(fullUrl);
       }
     },
     [applyApiTracks],
@@ -217,8 +287,17 @@ export default function HomeScreen() {
   }, [apiClient, applyApiTracks, handleStreamEvent]);
 
   /*
+   * Phase E ducking：TTS 播放期间把音乐音量降到 0.3，结束后恢复 1.0。
+   * 仅观察 tts.playing 切换；setVolume 内部已做平台兜底。
+   */
+  useEffect(() => {
+    radio.setVolume(tts.playing ? 0.3 : 1);
+  }, [radio, tts.playing]);
+
+  /*
    * 发送用户输入到服务端。
    * 成功后更新 DJ 文案和播放器曲目；失败时用 DJ 气泡反馈离线状态。
+   * Phase E：根据 ttsEnabled 透传 voice 字段，让服务端按需异步合成 TTS。
    */
   const handleSend = useCallback(
     async (text: string) => {
@@ -227,7 +306,7 @@ export default function HomeScreen() {
       setDjTime(formatBubbleTime());
 
       try {
-        const response = await apiClient.sendChat({ text });
+        const response = await apiClient.sendChat({ text, voice: ttsEnabled });
         setDjText(response.say);
         setDjTime(formatBubbleTime());
         setDjLoading(false);
@@ -240,8 +319,23 @@ export default function HomeScreen() {
         setConnectionState('offline');
       }
     },
-    [apiClient, refreshNowAndNext],
+    [apiClient, refreshNowAndNext, ttsEnabled],
   );
+
+  /*
+   * DJBubble 重播按钮：再次播放最近一次 tts-ready 的音频。
+   * 没有最近 TTS 时按钮无效，不触发任何动作。
+   * 走 ttsRef 防止把 tts 加进 useCallback 依赖。
+   */
+  const handleReplayTts = useCallback(() => {
+    if (!lastTtsUrl) return;
+    ttsRef.current.play(lastTtsUrl);
+  }, [lastTtsUrl]);
+
+  /* Voice 徽章点击切换 TTS 播报开关，发送 chat 时再按当前状态透传给服务端。 */
+  const handleVoiceToggle = useCallback(() => {
+    setTtsEnabled((value) => !value);
+  }, []);
 
   /*
    * 切换服务端模型。
@@ -295,12 +389,25 @@ export default function HomeScreen() {
           {/* 顶部状态栏（带 AI 模型徽章，避免右下角宠物名遮挡正文） */}
           <TopBar modelName={currentModelName} />
 
-          {/* 时钟 + 日期 + ON AIR */}
+          {/* 封面 / 时钟 + ON AIR：有歌曲封面时优先展示封面，失败时回退时钟。 */}
           <View className="items-center pt-4 pb-6 px-4">
-            <PixelClock />
-            <View className="mt-3">
-              <DateLine />
-            </View>
+            {showTrackArtwork ? (
+              <TrackArtworkPanel
+                artwork={artworkUrl}
+                title={radio.track.title}
+                artist={radio.track.artist}
+                playing={animationActive}
+                size={artworkPanelSize}
+                onArtworkError={handleArtworkError}
+              />
+            ) : (
+              <>
+                <PixelClock />
+                <View className="mt-3">
+                  <DateLine />
+                </View>
+              </>
+            )}
             <View className="mt-3">
               <OnAirIndicator />
             </View>
@@ -345,7 +452,15 @@ export default function HomeScreen() {
           />
 
           {/* DJ 长文气泡 */}
-          <DJBubble text={djText} time={djTime} live loading={djLoading} onReplay={() => undefined} />
+          <DJBubble
+            text={djText}
+            time={djTime}
+            live
+            loading={djLoading}
+            voiceActive={ttsEnabled}
+            onVoiceToggle={handleVoiceToggle}
+            onReplay={handleReplayTts}
+          />
 
           {/* 用户短回复气泡 */}
           <UserBubble text="好听" name="MMGUO" time="21:09" />

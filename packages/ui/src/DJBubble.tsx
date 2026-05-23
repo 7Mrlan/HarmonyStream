@@ -1,23 +1,15 @@
 /*
  * 组件：DJBubble
- * 作用：DJ "Claudio" 的对话气泡，长文本主体，左侧头像 + 顶部时间 + LIVE 标签
+ * 作用：DJ "Claudio" 的对话气泡，长文本主体，左侧头像 + 顶部名称 + Voice 状态徽章
  * 设计：硬边框 1px，无圆角胶囊；正文用 VT323 / Cubic11 等宽
- *      LIVE 标签前加 1Hz 闪烁红点，呼应"广播中"语义
+ *      Voice 徽章继承原红色文字盒质感，并按开关状态切换左侧动画
  *      可选打字机效果（typing 模式按字符显示，模拟流式输出）
  */
 
 import { useEffect, useState } from 'react';
 import { View, Text, Pressable } from 'react-native';
-import Animated, {
-  Easing,
-  cancelAnimation,
-  interpolate,
-  useAnimatedStyle,
-  useSharedValue,
-  withRepeat,
-  withTiming,
-} from 'react-native-reanimated';
 import { RadioTuningLoader } from './RadioTuningLoader';
+import { VoiceToggle } from './VoiceToggle';
 
 export interface DJBubbleProps {
   /* 主体文本，可多段落 */
@@ -26,8 +18,12 @@ export interface DJBubbleProps {
   name?: string;
   /* 时间戳，例如 "21:02" */
   time?: string;
-  /* 是否处于"流式播放中"，true 时右上角显示 LIVE 红点 */
+  /* 是否显示顶部状态徽章；保留 live 命名兼容旧调用，当前徽章显示 Voice 状态 */
   live?: boolean;
+  /* Voice 是否启用；true 时徽章显示 VOICE ON */
+  voiceActive?: boolean;
+  /* 点击 Voice 徽章切换 TTS 播报 */
+  onVoiceToggle?: () => void;
   /* 打字机效果：true 时按字符逐个出现，速度由 typingSpeedMs 控制 */
   typing?: boolean;
   /* LLM 等待态：true 时显示电台调频加载组件，不显示本地垫话 */
@@ -60,39 +56,6 @@ function useTypewriter(text: string, typing: boolean, speedMs: number) {
   return out;
 }
 
-/* Hook：LIVE 红点 1Hz 闪烁 */
-function useLiveBlink(active: boolean) {
-  const pulse = useSharedValue(0);
-
-  useEffect(() => {
-    cancelAnimation(pulse);
-
-    if (!active) {
-      pulse.value = withTiming(0, { duration: 120, easing: Easing.out(Easing.quad) });
-      return undefined;
-    }
-
-    pulse.value = 0;
-    pulse.value = withRepeat(
-      withTiming(1, {
-        duration: 1000,
-        easing: Easing.linear,
-      }),
-      -1,
-      false,
-    );
-
-    return () => {
-      cancelAnimation(pulse);
-    };
-  }, [active, pulse]);
-
-  /* LIVE 红点只是视觉闪烁，交给 Reanimated，避免 setInterval 触发 React state。 */
-  return useAnimatedStyle(() => ({
-    opacity: active ? interpolate(pulse.value, [0, 0.5, 1], [1, 0.3, 1]) : 0.3,
-  }));
-}
-
 /*
  * 工具：按 DJ 气泡正文区域计算调频模块宽度。
  * 宽屏限制为小仪表，窄屏保持可读但不超过正文区域。
@@ -109,6 +72,8 @@ export function DJBubble({
   name = 'CLAUDIO',
   time,
   live = false,
+  voiceActive = false,
+  onVoiceToggle,
   typing = false,
   loading = false,
   typingSpeedMs = 20,
@@ -116,9 +81,9 @@ export function DJBubble({
   onReplay,
 }: DJBubbleProps) {
   const display = useTypewriter(text, typing && !loading, typingSpeedMs);
-  const liveDotStyle = useLiveBlink(live);
   const [contentWidth, setContentWidth] = useState(0);
   const tuningLoaderWidth = resolveTuningLoaderWidth(contentWidth);
+  const showVoiceBadge = live || Boolean(onVoiceToggle);
 
   return (
     <View className="flex-row px-4 py-3" style={{ gap: 12 }}>
@@ -138,30 +103,10 @@ export function DJBubble({
           }
         }}
       >
-        {/* 顶部一行：DJ 名 + LIVE 标签 */}
+        {/* 顶部一行：DJ 名 + Voice 状态徽章 */}
         <View className="flex-row items-center" style={{ gap: 8 }}>
           <Text className="font-pixel text-text text-base tracking-pixel">{name}</Text>
-          {live ? (
-            <View
-              className="px-1.5 py-0.5 border flex-row items-center"
-              style={{ borderColor: '#ff3355', gap: 4 }}
-            >
-              {/* 闪烁红点：广播中视觉信号 */}
-              <Animated.View
-                style={[
-                  {
-                    width: 6,
-                    height: 6,
-                    backgroundColor: '#ff3355',
-                  },
-                  liveDotStyle,
-                ]}
-              />
-              <Text className="font-pixel text-xs tracking-pixel" style={{ color: '#ff3355' }}>
-                LIVE
-              </Text>
-            </View>
-          ) : null}
+          {showVoiceBadge ? <VoiceToggle active={voiceActive} onPress={onVoiceToggle} /> : null}
         </View>
 
         {/* 主文本或 LLM 等待态 */}

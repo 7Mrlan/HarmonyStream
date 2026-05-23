@@ -44,8 +44,14 @@ export type { PlayerControlAction, PlayerControlsProps } from './PlayerControls'
 export { RadioTuningLoader } from './RadioTuningLoader';
 export type { RadioTuningLoaderProps } from './RadioTuningLoader';
 
+export { TrackArtworkPanel } from './TrackArtworkPanel';
+export type { TrackArtworkPanelProps } from './TrackArtworkPanel';
+
 export { TopBar } from './TopBar';
 export type { TopBarProps } from './TopBar';
 
 export { UserBubble } from './UserBubble';
 export type { UserBubbleProps } from './UserBubble';
+
+export { VoiceToggle } from './VoiceToggle';
+export type { VoiceToggleProps } from './VoiceToggle';

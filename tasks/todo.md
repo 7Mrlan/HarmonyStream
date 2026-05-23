@@ -22,37 +22,10 @@
 - [x] Phase B：移动端接入服务端 API
 - [x] Phase C：LLM 主播最小接入
 - [x] Phase C+：主播等待体验与电台调频加载动画
-- [ ] Phase D：音乐来源接入，优先服务端返回真实 `Track`
-- [ ] Phase E：TTS 入声与 `tts-ready` 推送
+- [x] Phase D：音乐来源接入，优先服务端返回真实 `Track`
+- [x] Phase D.5：音源与播放性能地基，流式传输 / 缓存 / 预加载
+- [x] Phase E：TTS 入声与 `tts-ready` 推送
 - [ ] Phase F：后台播放、锁屏控制、APK release、长时运行等产品化任务
-
----
-
-## Phase D · 音乐来源接入
-
-### Spec 状态
-
-- [x] Phase D 现状分析写入 `tasks/spec.md`
-- [x] 确认 Phase D 现状分析
-- [x] 写入 Phase D 功能点与文件级计划
-- [ ] 确认 Phase D 功能点与文件级计划
-- [ ] 写入 Phase D 风险与决策
-- [ ] 确认 Phase D 风险与决策
-- [ ] HARD-GATE：用户确认完整 Phase D Spec 后开始编码
-
-### 执行任务
-
-- [ ] 新增服务端音乐解析层，输入用户文本 / LLM 曲名，输出可播放 `Track[]`
-- [ ] 将 `radioState.ts` 主路径从 SoundHelix mock 切到真实音乐解析优先
-- [ ] 保留 SoundHelix 作为 provider 失败 fallback
-- [ ] 保持 `/api/chat`、`/api/now`、`/api/next`、`/stream` 契约不破坏移动端
-- [ ] 执行服务端、API、移动端和全仓验证
-
-### 明确边界
-
-- 不接 TTS、数据库、长期记忆、后台播放或 APK release。
-- 不把音乐 provider key 放到前端或 `EXPO_PUBLIC_*`。
-- 不先改播放器架构；只有真实音源暴露跨域、鉴权、重定向或过期 URL 问题时再调整。
 
 ---
 
@@ -65,6 +38,9 @@
 | Phase B | 完成 | 移动端通过 `packages/api` 接入服务端 HTTP / WS。 |
 | Phase C | 完成 | DeepSeek LLM 主播接入；无 key fallback 和真实 LLM 均验证通过。 |
 | Phase C+ | 完成 | DJ 等待态改为调频加载动画；移除本地假等待文案。 |
+| Phase D | 完成 | 服务端音乐解析优先返回真实 `Track`，artwork 贯通到移动端，provider 失败稳定回退 SoundHelix。详细 Review 见 `tasks/spec.md` §6。 |
+| Phase D.5 | 完成 | provider chain（local→external→ncm?→fallback）+ TTL/LRU cache + Range route + 客户端 60% 预热 + metrics 全过 typecheck/lint/curl；真实 provider 运行时验证留待用户配置后跑。详见 `tasks/spec.md` §6.2。 |
+| Phase E | 完成 | `msedge-tts` 接入；`/api/chat` 立返 + WS 后推 `tts-ready` + `/media/tts/:id` 200；移动端独立 `useTtsPlayer` + 音乐 ducking 0.3 + DJBubble REPLAY；voice 徽章合并到 DJ 顶栏；HTTP/WS/移动端三链验证通过。详见 `tasks/spec.md` §6.3。 |
 
 ---
 
@@ -77,6 +53,10 @@
 
 ---
 
-## 下一步
+## 当前任务 · Phase F（待启动）
 
-等待确认 `tasks/spec.md` 中 Phase D 的“功能点与文件级计划”。确认后继续写“风险与决策”，再进入最终 HARD-GATE。
+- [ ] 写 Phase F 现状分析（后台播放、锁屏控制、APK release、长时运行）
+- [ ] 等待用户确认现状分析
+- [ ] 写功能点与文件级计划
+- [ ] 写风险与决策
+- [ ] HARD-GATE 后启动编码

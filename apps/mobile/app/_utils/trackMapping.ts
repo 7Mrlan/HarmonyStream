@@ -19,6 +19,7 @@ export function mapApiTrackToRadioTrack(track: Track | null | undefined): RadioT
     url: track.url,
     title: track.title,
     artist: track.artist,
+    artwork: track.artwork,
     durationFallback: track.duration,
   };
 }

@@ -10,6 +10,7 @@ import Fastify from 'fastify';
 import websocket from '@fastify/websocket';
 import { env } from './env';
 import { registerApiRoutes } from './routes/apiRoutes';
+import { registerMediaRoutes } from './routes/mediaRoutes';
 import { registerStreamRoutes } from './routes/streamRoutes';
 
 /* 创建 Fastify 实例，pino 日志开发期友好打印 */
@@ -61,6 +62,7 @@ app.get('/health', async () => {
 void app.register(websocket);
 void app.register(async (routesApp) => {
   registerApiRoutes(routesApp);
+  registerMediaRoutes(routesApp);
   registerStreamRoutes(routesApp);
 });
 

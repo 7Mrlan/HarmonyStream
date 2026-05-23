@@ -17,6 +17,10 @@ import type {
   Track,
 } from '@claudio/api';
 import { generateDjResponse } from '../llm/llmAdapter';
+import { FALLBACK_TRACKS, cloneTrack } from '../music/fallbackCatalog';
+import { resolveTracksForChat } from '../music/musicResolver';
+import { cancelPendingPreloads, schedulePreload } from '../music/preload';
+import { nextChatId, scheduleTts } from '../tts/scheduler';
 
 type RadioPlaybackState = NowResponse['state'];
 
@@ -51,30 +55,6 @@ const MODELS: ModelInfo[] = [
     id: 'glm',
     displayName: '智谱 GLM',
     petSprite: 'glm',
-  },
-];
-
-const MOCK_TRACKS: Track[] = [
-  {
-    id: 'soundhelix-1',
-    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
-    title: 'Late Night Drive',
-    artist: 'SoundHelix',
-    duration: 372,
-  },
-  {
-    id: 'soundhelix-2',
-    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
-    title: 'Synthwave Pulse',
-    artist: 'SoundHelix',
-    duration: 425,
-  },
-  {
-    id: 'soundhelix-8',
-    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3',
-    title: 'Pixel Reverie',
-    artist: 'SoundHelix',
-    duration: 288,
   },
 ];
 
@@ -134,16 +114,19 @@ export function getNowPlaying(): NowResponse {
 /*
  * 获取下一首推荐。
  * 优先读取内存队列；队列为空时使用 fallback 曲目，保证 API 始终可验证。
+ * 返回前调度一次轻量预热（HEAD artwork / stat 本地文件），不下载音频内容。
  */
 export function getNextTrack(): NextResponse {
-  const track = radioState.queue[0] ?? MOCK_TRACKS[0] ?? null;
+  const track = radioState.queue[1] ?? radioState.queue[0] ?? FALLBACK_TRACKS[0] ?? null;
+
+  if (track) schedulePreload(track);
 
   return {
     track,
     reason:
-      track === radioState.queue[0]
+      track && radioState.queue.includes(track)
         ? '来自 Claudio 当前内存队列。'
-        : 'Phase A fallback：服务端尚未接入真实音乐服务，先返回可播放测试曲目。',
+        : '音乐队列为空，先返回可播放 fallback 曲目。',
   };
 }
 
@@ -154,7 +137,9 @@ export function getNextTrack(): NextResponse {
  */
 export async function handleChat(request: ChatRequest): Promise<ChatResult> {
   const text = request.text.trim();
-  const selectedTrack = selectTrackForText(text);
+  const musicPlan = await resolveTracksForChat({ userText: text, limit: 3 });
+  const candidateTracks = musicPlan.tracks.map(cloneTrack);
+  const selectedTrack = candidateTracks[0] ?? cloneTrack(FALLBACK_TRACKS[0]);
   const currentModel = getCurrentModel();
   const generated = await generateDjResponse({
     userText: text,
@@ -163,20 +148,37 @@ export async function handleChat(request: ChatRequest): Promise<ChatResult> {
     playbackState: radioState.playbackState,
     currentTrack: radioState.currentTrack,
     selectedTrack,
-    candidateTracks: MOCK_TRACKS.map(cloneTrack),
+    candidateTracks,
   });
   const response = generated.ok
     ? generated.response
-    : buildFallbackChatResponse(text, selectedTrack, generated.reason);
+    : buildFallbackChatResponse(text, selectedTrack, generated.reason, musicPlan.reason);
+  const currentTrack = chooseTrackFromPlay(response.play, candidateTracks) ?? selectedTrack;
+  const queue = buildQueue(currentTrack, candidateTracks);
 
-  radioState.currentTrack = selectedTrack;
+  /* 队列翻篇时取消旧预热任务，再把新队列里的下一首加入预热。 */
+  cancelPendingPreloads();
+
+  radioState.currentTrack = currentTrack;
   radioState.playbackState = 'playing';
-  radioState.queue = buildQueue(selectedTrack);
+  radioState.queue = queue;
   radioState.messages = [...radioState.messages, response].slice(-20);
+
+  /* 不阻塞 /api/chat：仅触发调度，预热在后台串行执行。 */
+  if (queue[1]) schedulePreload(queue[1]);
+
+  /*
+   * Phase E：voice=true 时异步触发 TTS 合成；HTTP 不等待。
+   * chatId 单调递增，新一轮 chat 进来后旧 TTS 结果会被丢弃，避免广播过期音频。
+   */
+  if (request.voice) {
+    const chatId = nextChatId();
+    scheduleTts(response.say, chatId);
+  }
 
   return {
     response,
-    currentTrack: selectedTrack,
+    currentTrack,
     queue: radioState.queue.map((track) => ({ ...track })),
   };
 }
@@ -190,19 +192,6 @@ export function getQueueSnapshot(): Track[] {
 }
 
 /*
- * 按用户输入选择一首 mock 曲目。
- * 这里保持 O(1) 的轻量规则，后续 Phase C/D 会替换成 LLM + 音乐服务。
- */
-function selectTrackForText(text: string): Track {
-  if (!text) return cloneTrack(MOCK_TRACKS[0]);
-
-  const codePointSum = Array.from(text).reduce((total, char) => total + char.charCodeAt(0), 0);
-  const index = codePointSum % MOCK_TRACKS.length;
-
-  return cloneTrack(MOCK_TRACKS[index] ?? MOCK_TRACKS[0]);
-}
-
-/*
  * 构建 mock DJ 播报。
  * 文案保持稳定结构，方便 Phase B 做 UI 接入和回归验证。
  */
@@ -210,7 +199,7 @@ function buildMockDjScript(text: string, track: Track): string {
   const prompt = text || '今晚随便听点';
   const model = MODELS.find((item) => item.id === radioState.currentModel)?.displayName ?? 'Claudio';
 
-  return `${model} 正在接管 Claudio 信号。你说“${prompt}”，我先用一首 ${track.title} 把电台链路打通。真正的 AI 主播和网易云选曲会在后续阶段接入。`;
+  return `${model} 正在接管 Claudio 信号。你说“${prompt}”，我先用一首 ${track.title} 保持电台播放不断线。`;
 }
 
 /*
@@ -220,14 +209,16 @@ function buildMockDjScript(text: string, track: Track): string {
 function buildFallbackChatResponse(
   text: string,
   track: Track,
-  fallbackReason?: string,
+  llmFallbackReason?: string,
+  musicFallbackReason?: string,
 ): ChatResponse {
   const reason = `根据“${text || '今晚随便听点'}”选择一首适合夜间像素电台氛围的测试曲。`;
+  const fallbackDetails = [llmFallbackReason, musicFallbackReason].filter(Boolean).join('；');
 
   return {
     say: buildMockDjScript(text, track),
     play: [track.title],
-    reason: fallbackReason ? `${reason} LLM fallback：${fallbackReason}。` : reason,
+    reason: fallbackDetails ? `${reason} fallback：${fallbackDetails}。` : reason,
     segue: '信号已接入，Claudio 先为你推上一首安全可播放的 demo track。',
   };
 }
@@ -248,27 +239,31 @@ function getCurrentModel(): ModelInfo {
 }
 
 /*
- * 构建当前队列。
- * 选中的当前曲放在队首，剩余曲目保持可验证的顺序。
+ * 按 LLM play 字段从候选曲里选择当前曲。
+ * 匹配不到时交回调用方使用预选曲，保证队列始终可播放。
  */
-function buildQueue(currentTrack: Track): Track[] {
-  const tail = MOCK_TRACKS.filter((track) => track.id !== currentTrack.id).map(cloneTrack);
+function chooseTrackFromPlay(play: string[], candidateTracks: Track[]): Track | null {
+  for (const title of play) {
+    const matchedTrack = candidateTracks.find((track) => isSameTitle(track.title, title));
+    if (matchedTrack) return cloneTrack(matchedTrack);
+  }
+
+  return null;
+}
+
+/*
+ * 构建当前队列。
+ * 选中的当前曲放在队首，剩余候选曲保持 provider 顺序。
+ */
+function buildQueue(currentTrack: Track, candidateTracks: Track[]): Track[] {
+  const tail = candidateTracks
+    .filter((track) => (track.id || track.url) !== (currentTrack.id || currentTrack.url))
+    .map(cloneTrack);
 
   return [cloneTrack(currentTrack), ...tail];
 }
 
-/*
- * 克隆曲目对象。
- * Track 目前是扁平结构，浅拷贝足够隔离内存状态。
- */
-function cloneTrack(track: Track | undefined): Track {
-  return {
-    ...(track ?? {
-      id: 'fallback',
-      url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
-      title: 'Fallback Signal',
-      artist: 'Claudio',
-      duration: 372,
-    }),
-  };
+/* 宽松曲名匹配，兼容 LLM 输出的大小写和空格差异。 */
+function isSameTitle(left: string, right: string): boolean {
+  return left.trim().toLowerCase() === right.trim().toLowerCase();
 }

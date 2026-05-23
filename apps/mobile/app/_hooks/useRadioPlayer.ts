@@ -25,6 +25,8 @@ export interface RadioTrack {
   title: string;
   /* 显示用艺术家 */
   artist?: string;
+  /* 显示用封面图，仅作为 UI 层视觉信息 */
+  artwork?: string;
   /* 总时长（秒）— 用于无元数据时的占位显示，加载完成后会被真实 duration 覆盖 */
   durationFallback?: number;
 }
@@ -59,6 +61,8 @@ export interface RadioPlayerActions {
   next: () => void;
   /* 切换到上一首 */
   prev: () => void;
+  /* 设置播放音量；范围 0-1。Phase E 用于 TTS 期间的 ducking。 */
+  setVolume: (volume: number) => void;
 }
 
 /*
@@ -197,6 +201,23 @@ export function useRadioPlayer(
     setTrackIndex((i) => (i - 1 + playlist.length) % playlist.length);
   }, [playlist.length, status.playing]);
 
+  /*
+   * 设置播放音量。
+   * Phase E：TTS 期间把音乐 ducking 到 0.3，结束后恢复 1.0；
+   * expo-audio 的 player.volume 在 web/native 都生效。
+   */
+  const setVolume = useCallback(
+    (volume: number) => {
+      const clamped = Math.max(0, Math.min(1, volume));
+      try {
+        (player as unknown as { volume: number }).volume = clamped;
+      } catch {
+        /* 个别平台未实现 volume setter 时静默忽略，TTS 仍能播放，只是没 ducking。 */
+      }
+    },
+    [player],
+  );
+
   return {
     track,
     playing: status.playing,
@@ -211,5 +232,6 @@ export function useRadioPlayer(
     seek,
     next,
     prev,
+    setVolume,
   };
 }
