@@ -12,6 +12,9 @@ import { env } from './env';
 import { registerApiRoutes } from './routes/apiRoutes';
 import { registerMediaRoutes } from './routes/mediaRoutes';
 import { registerStreamRoutes } from './routes/streamRoutes';
+import { shutdownStreamHub } from './realtime/streamHub';
+import { shutdownAudioStore } from './tts/audioStore';
+import { shutdownMusicResolver } from './music/musicResolver';
 
 /* 创建 Fastify 实例，pino 日志开发期友好打印 */
 const app = Fastify({
@@ -79,5 +82,59 @@ async function start(): Promise<void> {
     process.exit(1);
   }
 }
+
+/*
+ * Phase F：graceful shutdown。
+ *   - SIGINT / SIGTERM 触发后先关 fastify HTTP / WS，再清 streamHub 心跳与 client、音频缓存与 resolveCache。
+ *   - 单调标记防止重复 shutdown；15s 兜底强退，避免开发联调挂死进程。
+ *   - 出错路径继续清理后续资源，不让单个失败阻塞退出链路。
+ */
+let shuttingDown = false;
+async function shutdown(signal: string): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+
+  app.log.info(`[shutdown] received ${signal}, closing server...`);
+
+  /* 15s 兜底：超时仍未走完清理，直接强退；exitCode=1 标记非正常退出。 */
+  const forceTimer = setTimeout(() => {
+    app.log.error('[shutdown] timeout, force exit');
+    process.exit(1);
+  }, 15_000);
+  forceTimer.unref?.();
+
+  try {
+    /* 先关 fastify：会一并关闭 @fastify/websocket 注册的 WS 连接的接受端。 */
+    await app.close();
+  } catch (err) {
+    app.log.error({ err }, '[shutdown] app.close failed');
+  }
+  try {
+    shutdownStreamHub();
+  } catch (err) {
+    app.log.error({ err }, '[shutdown] streamHub failed');
+  }
+  try {
+    shutdownAudioStore();
+  } catch (err) {
+    app.log.error({ err }, '[shutdown] audioStore failed');
+  }
+  try {
+    shutdownMusicResolver();
+  } catch (err) {
+    app.log.error({ err }, '[shutdown] musicResolver failed');
+  }
+
+  clearTimeout(forceTimer);
+  app.log.info('[shutdown] ok');
+  process.exit(0);
+}
+
+process.on('SIGINT', () => {
+  void shutdown('SIGINT');
+});
+process.on('SIGTERM', () => {
+  void shutdown('SIGTERM');
+});
 
 void start();

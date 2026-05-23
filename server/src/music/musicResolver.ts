@@ -35,6 +35,14 @@ const resolveCache: MusicCache<Track[]> = createMusicCache<Track[]>({
 });
 
 /*
+ * Phase F：graceful shutdown 时清空 resolve cache。
+ * 进程退出后内存自然释放；显式 clear 是为了在多进程或热重载场景下不留尾。
+ */
+export function shutdownMusicResolver(): void {
+  resolveCache.clear();
+}
+
+/*
  * 为聊天请求解析候选曲目。
  * provider chain 任意环节成功即返回；全部失败时使用 fallback provider 兜底。
  */

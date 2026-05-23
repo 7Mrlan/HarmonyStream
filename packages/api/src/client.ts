@@ -38,8 +38,10 @@ export interface StreamHandlers {
 export interface StreamSubscription {
   /* 原始 socket；当前环境没有 WebSocket 时为 null */
   socket: WebSocket | null;
-  /* 关闭连接 */
+  /* 关闭连接（显式关闭后不会再自动重连） */
   close: () => void;
+  /* 立即触发一次重连（重置退避计时；显式 close 之后调用无效） */
+  reconnectNow: () => void;
 }
 
 export interface ClaudioApiClient {
@@ -158,7 +160,11 @@ async function readJsonPayload(response: Response): Promise<unknown> {
 
 /*
  * 建立 WS 连接并解析 StreamEvent。
- * 当前 WS 是增强链路，创建失败时返回可 close 的空订阅，避免 App 崩溃。
+ * Phase F：自带状态机 + 心跳 + 指数退避重连。
+ *   - 状态机：idle → connecting → open → reconnecting → closed
+ *   - 心跳：每 25s 发 {type:'ping'}；60s 未收到 pong 主动 close 触发重连
+ *   - 退避：0.5/1/2/4/8/16/30s + ±20% 抖动；reconnectNow 重置退避并立即连
+ *   - close()：显式关闭后不再重连，标记 closed 终态
  */
 function connectStream(
   WebSocketCtor: typeof WebSocket | undefined,
@@ -170,33 +176,188 @@ function connectStream(
     return {
       socket: null,
       close: () => undefined,
+      reconnectNow: () => undefined,
     };
   }
 
-  const socket = new WebSocketCtor(streamUrl);
+  /*
+   * 单个订阅生命周期内可能产生多个 socket 实例（每次重连换一个）。
+   * 这里用闭包变量持有最新 socket，subscription.socket 通过 getter 暴露。
+   */
+  let currentSocket: WebSocket | null = null;
+  /* 是否已被显式 close；为 true 后任何重连尝试都会被忽略 */
+  let disposed = false;
+  /* 重连尝试次数，用于查表得到下一次退避；连接成功后归零 */
+  let attempt = 0;
+  /* 待执行的重连 timer，allow 取消 */
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  /* 客户端心跳 timer */
+  let pingTimer: ReturnType<typeof setInterval> | null = null;
+  /* pong 等待超时 timer */
+  let pongTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
 
-  socket.onopen = () => {
-    handlers?.onOpen?.();
-  };
-  socket.onclose = () => {
-    handlers?.onClose?.();
-  };
-  socket.onerror = (event) => {
-    handlers?.onError?.(event);
-  };
-  socket.onmessage = (event) => {
-    const parsed = parseStreamEvent(event.data);
-    if (parsed) {
-      handlers?.onEvent?.(parsed);
-      return;
+  const clearTimers = () => {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
     }
-    handlers?.onError?.(new Error('无法解析 Claudio stream 事件'));
+    if (pingTimer) {
+      clearInterval(pingTimer);
+      pingTimer = null;
+    }
+    if (pongTimeoutTimer) {
+      clearTimeout(pongTimeoutTimer);
+      pongTimeoutTimer = null;
+    }
   };
+
+  const scheduleReconnect = () => {
+    if (disposed) return;
+    if (reconnectTimer) return;
+    /* 指数退避表，封顶 30s；attempt 超过表长度后保持 30s */
+    const backoffTable = [500, 1000, 2000, 4000, 8000, 16000, 30000];
+    const base = backoffTable[Math.min(attempt, backoffTable.length - 1)] ?? 30000;
+    /* ±20% 抖动，避免大量客户端集体重连 */
+    const jitter = base * (0.8 + Math.random() * 0.4);
+    attempt += 1;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      open();
+    }, jitter);
+  };
+
+  const armPongTimeout = () => {
+    if (pongTimeoutTimer) clearTimeout(pongTimeoutTimer);
+    /* 60s 内任何消息（pong 或业务事件）都会重置；超时则主动 close */
+    pongTimeoutTimer = setTimeout(() => {
+      try {
+        currentSocket?.close();
+      } catch {
+        /* 静默：close 失败由 onclose 兜底 */
+      }
+    }, 60_000);
+  };
+
+  const open = () => {
+    if (disposed) return;
+    clearTimers();
+
+    const socket = new WebSocketCtor(streamUrl);
+    currentSocket = socket;
+    let socketFinalized = false;
+
+    /*
+     * 统一收口 socket 结束路径。
+     * 部分运行时连接失败只触发 error，不保证继续触发 close；这里确保 error / close 都能进入同一条重连链路。
+     */
+    const finalizeSocket = () => {
+      if (socketFinalized) return;
+      socketFinalized = true;
+      clearTimers();
+      if (currentSocket === socket) {
+        currentSocket = null;
+      }
+      handlers?.onClose?.();
+      if (!disposed) scheduleReconnect();
+    };
+
+    socket.onopen = () => {
+      attempt = 0;
+      armPongTimeout();
+      /* 25s 一次的客户端 ping，配合服务端 30s ping 互为兜底 */
+      pingTimer = setInterval(() => {
+        if (socket.readyState !== socket.OPEN) return;
+        try {
+          socket.send(JSON.stringify({ type: 'ping' }));
+        } catch {
+          /* 静默：send 失败由 onclose 兜底 */
+        }
+      }, 25_000);
+      handlers?.onOpen?.();
+    };
+
+    socket.onclose = () => {
+      finalizeSocket();
+    };
+
+    socket.onerror = (event) => {
+      if (disposed || socketFinalized) return;
+      handlers?.onError?.(event);
+      finalizeSocket();
+      try {
+        socket.close();
+      } catch {
+        /* 静默 */
+      }
+    };
+
+    socket.onmessage = (event) => {
+      /* 任何消息（含心跳）都视为对端存活，重置 pong 超时 */
+      armPongTimeout();
+
+      if (isHeartbeatMessage(event.data)) {
+        /* 心跳消息不进 StreamEvent 链路，避免污染业务事件 */
+        return;
+      }
+
+      const parsed = parseStreamEvent(event.data);
+      if (parsed) {
+        handlers?.onEvent?.(parsed);
+        return;
+      }
+      handlers?.onError?.(new Error('无法解析 Claudio stream 事件'));
+    };
+  };
+
+  open();
 
   return {
-    socket,
-    close: () => socket.close(),
-  };
+    get socket() {
+      return currentSocket;
+    },
+    close: () => {
+      disposed = true;
+      clearTimers();
+      try {
+        currentSocket?.close();
+      } catch {
+        /* 静默 */
+      }
+      currentSocket = null;
+    },
+    reconnectNow: () => {
+      if (disposed) return;
+      attempt = 0;
+      try {
+        currentSocket?.close();
+      } catch {
+        /* 静默：onclose 会触发 scheduleReconnect */
+      }
+      /* 若当前没有活动 socket（已是 reconnecting 状态），立即排程一次新连接 */
+      if (!currentSocket) {
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = null;
+        }
+        open();
+      }
+    },
+  } satisfies StreamSubscription;
+}
+
+/*
+ * 判断消息是否为心跳。
+ * 仅识别 {type:'ping'} 与 {type:'pong'}；其它一律走 StreamEvent 解析。
+ */
+function isHeartbeatMessage(data: unknown): boolean {
+  if (typeof data !== 'string') return false;
+  try {
+    const parsed = JSON.parse(data) as unknown;
+    if (!isRecord(parsed)) return false;
+    return parsed.type === 'ping' || parsed.type === 'pong';
+  } catch {
+    return false;
+  }
 }
 
 /*

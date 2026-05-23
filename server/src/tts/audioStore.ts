@@ -52,6 +52,15 @@ export function clearAudioStoreForTests(): void {
   store.clear();
 }
 
+/*
+ * Phase F：进程退出时清理音频缓存。
+ * 与 clearAudioStoreForTests 行为相同；分函数命名是为了语义清晰，
+ * 避免 graceful shutdown 路径误用 "ForTests" 字样。
+ */
+export function shutdownAudioStore(): void {
+  store.clear();
+}
+
 /* 当前条目数，便于排障。 */
 export function audioStoreSize(): number {
   return store.size();

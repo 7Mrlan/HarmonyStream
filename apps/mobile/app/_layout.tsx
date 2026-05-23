@@ -18,6 +18,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { View } from 'react-native';
+import { useAudioSession } from './_hooks/useAudioSession';
 
 /* 字体加载完毕前阻塞启动屏，避免无字体闪现 */
 SplashScreen.preventAutoHideAsync().catch(() => {
@@ -25,6 +26,12 @@ SplashScreen.preventAutoHideAsync().catch(() => {
 });
 
 export default function RootLayout() {
+  /*
+   * 全局音频会话必须在根布局挂载一次。
+   * 这样 radio 与 TTS 两个 expo-audio player 都共享后台播放和锁屏所需的会话规则。
+   */
+  useAudioSession();
+
   /*
    * 字体说明：
    *   - PixelOperator.ttf  时钟与英文标题
@@ -54,7 +61,7 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView className="flex-1 bg-bg">
       <SafeAreaProvider>
-        <StatusBar style="light" backgroundColor="#000000" translucent />
+        <StatusBar style="light" />
         <Stack
           screenOptions={{
             headerShown: false,

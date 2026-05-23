@@ -16,7 +16,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ScrollView, useWindowDimensions, View } from 'react-native';
+import { AppState, ScrollView, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { createApiClient, type ModelInfo, type StreamEvent, type Track } from '@claudio/api';
 import {
@@ -39,6 +39,7 @@ import {
   type PlayerControlAction,
 } from '@claudio/ui';
 import { getApiBaseUrl } from './_config/api';
+import { useNowPlayingMedia } from './_hooks/useNowPlayingMedia';
 import { useRadioPlayer, type RadioTrack } from './_hooks/useRadioPlayer';
 import { useTtsPlayer } from './_hooks/useTtsPlayer';
 import { mapApiTrackToRadioTrack, mapApiTracksToRadioTracks } from './_utils/trackMapping';
@@ -93,6 +94,12 @@ export default function HomeScreen() {
   const [serverPlaylist, setServerPlaylist] = useState<RadioTrack[]>([]);
   /* 真实音频播放引擎：替换 v1 的 mock playing/position */
   const radio = useRadioPlayer(serverPlaylist.length > 0 ? serverPlaylist : undefined);
+  /* Phase F：把当前曲目同步给系统锁屏 / 媒体会话，用于后台播放和锁屏展示。 */
+  useNowPlayingMedia({
+    player: radio.lockScreenPlayer,
+    track: radio.track,
+    active: Boolean(radio.track.url),
+  });
   /* Phase E：独立 TTS 播放器；与 radio 完全隔离，避免 DJ 一开口就打断当前歌曲 */
   const tts = useTtsPlayer();
   /*
@@ -268,20 +275,37 @@ export default function HomeScreen() {
         if (!disposed) setConnectionState('connected');
       },
       onClose: () => {
-        if (!disposed) setConnectionState((state) => (state === 'connecting' ? 'offline' : state));
+        /*
+         * Phase F：connectStream 已带指数退避自动重连；
+         * onClose 不再切 'offline'，直接复用 'connecting' 表示"正在重连"。
+         * UI 层 ConnectionStatus 只有三态，不为重连单独新增态。
+         */
+        if (!disposed) setConnectionState('connecting');
       },
       onError: () => {
-        if (!disposed) setConnectionState((state) => (state === 'connecting' ? 'offline' : state));
+        if (!disposed) setConnectionState((state) => (state === 'connected' ? 'connecting' : state));
       },
       onEvent: (event) => {
         if (!disposed) handleStreamEvent(event);
       },
     });
 
+    /*
+     * Phase F：App 从后台回到前台时，主动触发一次重连，
+     * 不等指数退避计时器，可让用户立刻看到 connected。
+     */
+    const appStateSubscription = AppState.addEventListener('change', (next) => {
+      if (disposed) return;
+      if (next === 'active') {
+        subscription.reconnectNow();
+      }
+    });
+
     void bootstrapApiState();
 
     return () => {
       disposed = true;
+      appStateSubscription.remove();
       subscription.close();
     };
   }, [apiClient, applyApiTracks, handleStreamEvent]);

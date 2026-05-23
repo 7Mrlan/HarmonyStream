@@ -13,7 +13,7 @@
  *   - Web 端：expo-audio 内部 fallback 到 HTMLAudioElement，兼容浏览器调试
  */
 
-import { useAudioPlayer, useAudioPlayerStatus, type AudioSource } from 'expo-audio';
+import { useAudioPlayer, useAudioPlayerStatus, type AudioPlayer, type AudioSource } from 'expo-audio';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 
@@ -65,6 +65,16 @@ export interface RadioPlayerActions {
   setVolume: (volume: number) => void;
 }
 
+export type RadioLockScreenPlayer = Pick<
+  AudioPlayer,
+  'setActiveForLockScreen' | 'updateLockScreenMetadata' | 'clearLockScreenControls'
+>;
+
+export interface RadioPlayerLockScreenBridge {
+  /* 仅暴露锁屏副作用需要的播放器方法，避免页面层拿到完整 player。 */
+  lockScreenPlayer: RadioLockScreenPlayer;
+}
+
 /*
  * 默认电台播放列表（v1 mock，使用 SoundHelix 的开放测试音频）
  * SoundHelix 是程序生成音乐的开放试听站，允许免费用于演示与测试。
@@ -91,7 +101,7 @@ const DEFAULT_PLAYLIST: RadioTrack[] = [
 ];
 
 /*
- * expo-audio v0.3 的 Web fallback 实际返回毫秒，原生类型声明为秒。
+ * Web fallback 历史上返回毫秒，原生侧返回秒。
  * UI 层统一使用秒，seek 时再转换成播放器当前平台需要的单位。
  */
 const AUDIO_TIME_SCALE = Platform.OS === 'web' ? 1000 : 1;
@@ -115,7 +125,7 @@ function toPlayerTime(seconds: number): number {
  */
 export function useRadioPlayer(
   playlist: RadioTrack[] = DEFAULT_PLAYLIST,
-): RadioPlayerState & RadioPlayerActions {
+): RadioPlayerState & RadioPlayerActions & RadioPlayerLockScreenBridge {
   /* 当前播放索引 */
   const [trackIndex, setTrackIndex] = useState(0);
   /*
@@ -185,7 +195,7 @@ export function useRadioPlayer(
 
   const seek = useCallback(
     (seconds: number) => {
-      /* expo-audio v0.3 的 seekTo 是异步的，调用后立刻触发 status 更新 */
+      /* seekTo 是异步的，调用后会触发播放器状态更新。 */
       void player.seekTo(toPlayerTime(seconds));
     },
     [player],
@@ -233,5 +243,6 @@ export function useRadioPlayer(
     next,
     prev,
     setVolume,
+    lockScreenPlayer: player,
   };
 }

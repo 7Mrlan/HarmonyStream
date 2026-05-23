@@ -127,6 +127,18 @@
 
 ---
 
+## 2026-05-23 - 查依赖文档前必须先核对本地实际安装版本
+
+**触发**：Phase F 评估锁屏方案时，我用 `WebFetch` 抓 `docs.expo.dev/versions/v52.0.0/sdk/audio/`（链接显式带 v52），返回页面里写的是 SDK 55 内容（页面有 `Bundled version: ~56.0.9` / `~55.0.14` 字样）。我据此说 expo-audio "已经自带 setActiveForLockScreen + enableBackgroundPlayback config plugin"，并向用户复议把决策从 1.A `react-native-track-player` 改成 1.C "用 expo-audio 自带"。实际项目装的是 `expo-audio@0.3.5`（SDK 52，Nov 2024），grep `node_modules/expo-audio/src/Audio.types.ts` 里**没有** `setActiveForLockScreen`，`plugin/src/withAudio.ts` 里**没有** `enableBackgroundPlayback`，方案根本跑不起来。我还顺手给 `useAudioSession.ts` 写了 0.3.5 不存在的 `interruptionModeAndroid` 字段。
+
+**根因**：1. `docs.expo.dev/versions/v52.0.0/...` 这种带版本号路径在 Expo 官网会 302 到当前 latest，并不真返回 v52 内容；不能信 URL 自带的 v52 字样。2. 我直接把 docs 当真源用了，没有先打开 `node_modules/expo-audio/package.json` 确认 0.3.5，也没看 `Audio.types.ts` 是否真有那个 API。3. SDK 52 ↔ SDK 55 中间至少 PR #40124（2025-10-01 合入）这种新增 API 不向下兼容；技术决策必须基于实际安装版本，不能基于 latest 文档。
+
+**规则**：1. 任何"X 库支持 Y 功能"结论，先做三步本地核对：`Get-Content node_modules/<pkg>/package.json | Select-String version` 拿真版本 → grep 该包源码（`Audio.types.ts` / `index.ts` / config plugin）确认 API 真存在 → 再决策。**网文档只能作为印证，不能作为唯一依据**。2. 用 `WebFetch` / `WebSearch` 时强制带版本号（"expo-audio 0.3.5 setAudioModeAsync"），避免被 latest docs 误导；返回内容里出现别的 bundled version（`~55.0.14`）时立即警觉，停下来核对。3. `expo install` 装包后，写代码前先开 `node_modules/<pkg>/build/index.d.ts` 或 `src/*.types.ts` 看类型，类型里没有的字段不要写——TypeScript 在 strict 关闭场景未必能拦下。4. 每次提议"换技术方案"必须先核对原方案有没有真实代码在仓库里，避免空操作；本次 `react-native-track-player` 全仓 grep 没装，所以"删冗余"实际只是改 spec 文字，没有代码要回滚。
+
+**关联文件**：[apps/mobile/app/_hooks/useAudioSession.ts](file:///d:/code/cloudeMplatform/apps/mobile/app/_hooks/useAudioSession.ts)、[apps/mobile/package.json](file:///d:/code/cloudeMplatform/apps/mobile/package.json)、`tasks/spec.md` §10.3 决策 1
+
+---
+
 ## 2026-05-21 - pnpm + React Native/Expo 必须 hoisted 模式
 
 **触发**：连续出现 `react-native-worklets/plugin`、`@expo/metro-runtime`、`react-native-css-interop/jsx-runtime` 等模块找不到。
@@ -317,3 +329,15 @@
 **规则**：性能敏感组件改架构后，必须同步更新文件头、fallback 注释和关键 helper 注释；描述当前实现时只写真实运行路径，不用“历史上曾经怎么做”的词。若需要保留历史信息，只能放在任务记录或 lessons 中。
 
 **关联文件**：`packages/ui/src/MusicSpectrum.tsx`
+
+---
+
+## 2026-05-23 - 排障兜底必须在根因修复后反向删除
+
+**触发**：NativeWind / React 19 类型问题排查时临时加过 `declare module 'react'`、重复 tsconfig `types` 和 `expo-image` override；用户提醒项目不要有冗余包和垃圾代码。
+
+**根因**：排障过程中容易把“试过的兜底”留在仓库里，即使真正根因已经变成依赖矩阵不一致。残留 shim 会让后续维护者误判当前系统还依赖这些补丁。
+
+**规则**：1. 修复依赖矩阵后必须做一次反向验证：删掉 shim / override / 重复配置后跑 typecheck。2. 只有删掉会复现问题的兜底才能保留，并且必须写明本地验证证据。3. 根 `package.json` 的 pnpm overrides 必须能被 `pnpm why` 或明确 issue 链路证明，否则视为临时垃圾优先删除。
+
+**关联文件**：`apps/mobile/nativewind-env.d.ts`、`packages/ui/nativewind-env.d.ts`、`apps/mobile/tsconfig.json`、`packages/ui/tsconfig.json`、`package.json`

@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Pressable, Text, TextInput, View, type LayoutChangeEvent, type TextStyle } from 'react-native';
+import { Platform, Pressable, Text, TextInput, View, type LayoutChangeEvent, type TextStyle } from 'react-native';
 import Animated, {
   Easing,
   cancelAnimation,
@@ -18,6 +18,14 @@ import Animated, {
   withTiming,
   type SharedValue,
 } from 'react-native-reanimated';
+
+const TEXT_INPUT_BASE_STYLE: TextStyle = { padding: 0 };
+/*
+ * Web 端需要去掉浏览器默认 outline；RN TextStyle 类型不包含 none，
+ * 但 react-native-web 运行时支持该值，因此只在 web 分支做局部类型桥接。
+ */
+const TEXT_INPUT_WEB_RESET_STYLE =
+  Platform.OS === 'web' ? ({ outlineStyle: 'none' } as unknown as TextStyle) : undefined;
 
 export interface ChatInputProps {
   placeholder?: string;
@@ -263,7 +271,7 @@ export function ChatInput({
           placeholder={placeholder}
           placeholderTextColor="#6b7280"
           className="font-mono text-text text-base flex-1"
-          style={{ padding: 0, outlineStyle: 'none' } as TextStyle}
+          style={[TEXT_INPUT_BASE_STYLE, TEXT_INPUT_WEB_RESET_STYLE]}
           selectionColor="#00ff88"
           returnKeyType="send"
         />
