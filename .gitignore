@@ -18,6 +18,10 @@ apps/mobile/ios/
 *.apk
 *.aab
 
+# Debug traces
+apps/recrod/
+apps/record/
+
 # 环境变量与密钥
 .env
 .env.local
