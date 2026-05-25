@@ -106,6 +106,7 @@ export default function HomeScreen() {
   const [serverPlaylist, setServerPlaylist] = useState<RadioTrack[]>([]);
   /* 真实音频播放引擎：只消费服务端下发的真实曲目。 */
   const radio = useRadioPlayer(serverPlaylist);
+  const { setVolume } = radio;
   /* Phase F：把当前曲目同步给系统锁屏 / 媒体会话，用于后台播放和锁屏展示。 */
   useNowPlayingMedia({
     player: radio.lockScreenPlayer,
@@ -173,6 +174,21 @@ export default function HomeScreen() {
   }, []);
 
   /*
+   * 追加服务端返回的下一首。
+   * 预热只扩展队列，不能替换当前 playlist，否则播放器会重置到新数组第 0 首并中断当前曲。
+   */
+  const appendApiTracks = useCallback((tracks: Array<Track | null | undefined>) => {
+    const mappedTracks = mapApiTracksToRadioTracks(tracks);
+    if (mappedTracks.length === 0) return;
+
+    setServerPlaylist((playlist) => {
+      const existingUrls = new Set(playlist.map((track) => track.url));
+      const nextTracks = mappedTracks.filter((track) => !existingUrls.has(track.url));
+      return nextTracks.length > 0 ? [...playlist, ...nextTracks] : playlist;
+    });
+  }, []);
+
+  /*
    * 刷新当前曲和下一曲。
    * `/api/chat` 成功后调用，确保播放器拿到真实可播放 Track。
    */
@@ -203,12 +219,12 @@ export default function HomeScreen() {
     apiClient
       .getNext()
       .then((next) => {
-        applyApiTracks([next.track], false);
+        appendApiTracks([next.track]);
       })
       .catch(() => {
         /* 预热失败不影响当前播放，静默处理。 */
       });
-  }, [apiClient, applyApiTracks, radio.duration, radio.playing, radio.position, radio.track.url]);
+  }, [apiClient, appendApiTracks, radio.duration, radio.playing, radio.position, radio.track.url]);
 
   /*
    * 处理服务端 WS 事件。
@@ -330,8 +346,8 @@ export default function HomeScreen() {
    * 仅观察 tts.playing 切换；setVolume 内部已做平台兜底。
    */
   useEffect(() => {
-    radio.setVolume(tts.playing ? TTS_DUCKING_VOLUME : 1);
-  }, [radio, tts.playing]);
+    setVolume(tts.playing ? TTS_DUCKING_VOLUME : 1);
+  }, [setVolume, tts.playing]);
 
   /*
    * 发送用户输入到服务端。

@@ -42,6 +42,9 @@ export interface TtsResolveResult {
 const idCache: MusicCache<string> = createMusicCache<string>({
   maxEntries: env.TTS_CACHE_MAX_ENTRIES,
   defaultTtlMs: env.TTS_CACHE_TTL_MS,
+  onEvict: (_key, audioId) => {
+    if (typeof audioId === 'string') deleteAudio(audioId);
+  },
 });
 
 /*
@@ -90,11 +93,7 @@ export function buildCacheKey(text: string, voice: string, speed: number): strin
     .slice(0, 16);
 }
 
-/* 内部：写入 cache 并把上一次命中悬挂的 audioId 一并清理。 */
+/* 内部：写入 id cache；旧 id 的清理由 cache onEvict 统一处理。 */
 function writeIdCache(key: string, audioId: string): void {
-  const previous = idCache.get(key);
-  if (previous && previous !== audioId) {
-    deleteAudio(previous);
-  }
   idCache.set(key, audioId);
 }

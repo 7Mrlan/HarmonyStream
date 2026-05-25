@@ -1,21 +1,131 @@
-明白了！以下是简洁版音源插件推荐清单，仅包含你自用软件可集成的几个核心方案，方便直接交给 AI 或用于开发参考：
+存在问题：
 
-🔊 推荐音源插件方案（可用于自研音乐软件）
+server/src/state/radioState.ts 是一个 God Object，单文件 448 行，混合了：状态管理、LLM 编排（generateMusicIntent + generateDjResponse）、音乐解析（resolveTracksForChat）、TTS 调度、队列管理、模板文案生成、明确点歌解析。这违反了单一职责原则，且导致该模块难以单独测试。当前阶段可接受，但随着功能增长会成为技术债。
 
-YouTube + yt-dlp  
-   说明：通过 yt-dlp 从 YouTube 搜索并提取音频流。  
-   优点：曲库最全、音质高（支持 320kbps MP3 / Opus）、社区维护活跃。  
-   适用：主音源首选。
+四、代码质量详细分析
+1. 安全性
+问题 1
 
-Piped API  
-   说明：调用去中心化 YouTube 前端（如 pipedapi.kavin.rocks）获取音频，无需直连 Google。  
-   优点：规避地域限制、保护隐私、返回结构化 JSON。  
-   适用：YouTube 的合规替代方案。
+位置： server/src/env.ts:143 + server/src/routes/apiRoutes.ts
+严重程度：严重
+原因： SHARED_TOKEN 在 env schema 中定义，注释也说明是"App ↔ Server 静态鉴权 token"，但在所有路由（/api/chat、/api/models/switch 等）中均未校验。任何能访问服务端 IP 的客户端都可以无限调用 /api/chat 触发 LLM 计费请求。
+改进： 在 index.ts 的 onRequest hook 中增加 token 校验中间件，或在 apiRoutes.ts 中对写操作路由单独校验：
 
-SoundCloud  
-   说明：接入 SoundCloud 公开 API 获取独立音乐、Demo、混音等资源。  
-   优点：覆盖主流平台缺失的小众内容。  
-   适用：补充音源。
+// index.ts onRequest hook 中
+if (env.SHARED_TOKEN) {
+  const token = request.headers['x-claudio-token'];
+  if (token !== env.SHARED_TOKEN) {
+    reply.code(401).send({ error: 'Unauthorized' });
+    return;
+  }
+}
+问题 2
 
+位置： server/src/index.ts:37
+严重程度：一般
+原因： Access-Control-Allow-Origin: * 对个人局域网部署可接受，但若服务端暴露到公网，任意网页都可跨域调用 API。
+改进： 生产环境改为白名单，或引入 @fastify/cors 做精细控制。
+2. 健壮性
+问题 3
 
-✅ 建议架构：以 YouTube/Piped 为主，其余作为 fallback 插件，按优先级自动切换。
+位置： server/src/tts/ttsService.ts:42-100
+严重程度：一般
+原因： 注释声称"在 evict 时删除 audioStore 对应条目"，但 MusicCache 接口没有 eviction callback。当 idCache 因 LRU 淘汰一个条目时，对应的音频 buffer 仍留在 audioStore 中，直到 audioStore 自身的 LRU 才会清理。writeIdCache 只在同一 key 被覆写时清理旧 audio，不覆盖 LRU 淘汰路径。注释与实现不符，存在短暂内存多占。
+改进： 给 MusicCache 增加 onEvict 回调，或在 writeIdCache 之外增加定期扫描清理。
+问题 4
+
+位置： server/src/state/radioState.ts（整个模块）
+严重程度：一般
+原因： handleChat 没有并发保护。客户端 chatSendingRef 防止了 UI 层重复提交，但服务端没有互斥锁。若两个请求同时到达（多客户端或网络重试），两次 LLM + 音乐解析会并发执行，最后完成的那次会覆盖 radioState，可能导致 DJ 文案与当前曲目不一致。
+改进： 在 handleChat 入口加一个 Promise 队列或简单的 isProcessing flag。
+3. 性能
+问题 5（真实 bug）
+
+位置： apps/mobile/app/index.tsx:332-334
+严重程度：一般
+原因： ducking effect 的依赖数组包含 radio 对象：
+
+useEffect(() => {
+  radio.setVolume(tts.playing ? TTS_DUCKING_VOLUME : 1);
+}, [radio, tts.playing]);  // ← radio 每次渲染都是新对象引用
+useRadioPlayer 返回一个新对象字面量，radio 引用每次渲染都变化，导致 setVolume 在每次 HomeScreen 重渲染时都被调用（包括进度条每 100ms 的状态更新）。虽然 setVolume 本身是幂等的，但这是不必要的高频调用，且违反了 React hooks 的依赖语义。
+
+改进：
+
+const { setVolume } = radio;
+useEffect(() => {
+  setVolume(tts.playing ? TTS_DUCKING_VOLUME : 1);
+}, [setVolume, tts.playing]);
+问题 6
+
+位置： server/src/llm/llmAdapter.ts:238-273
+严重程度：建议
+原因： getProviderConfig 在每次 LLM 调用时重建 providers 对象。对象体积小，影响可忽略，但可以提升为模块级常量。
+4. 可维护性
+问题 7
+
+位置： server/src/state/radioState.ts:445 与 server/src/music/musicResolver.ts:219
+严重程度：一般
+原因： isSameTitle 在两个文件中各自定义，且实现不同：
+radioState.ts：严格等值匹配（===）
+musicResolver.ts：宽松包含匹配（includes，且不对称）
+两处语义不一致，可能导致同一首歌在不同路径下匹配结果不同。
+
+改进： 提取到 server/src/music/titleMatch.ts 共用，统一匹配语义。
+
+问题 8
+
+位置： apps/mobile/app/_hooks/useRadioPlayer.ts:209
+严重程度：建议
+原因： setVolume 通过 (player as unknown as { volume: number }).volume 绕过类型系统访问内部属性，是对 expo-audio 未公开 API 的 hack。当前有 try/catch 兜底，运行时安全，但若 expo-audio 升级后内部结构变化，ducking 会静默失效且无任何提示。
+改进： 在 setVolume 失败时打一条 console.warn，便于升级后排查。
+问题 9（真实 bug）
+
+位置： apps/mobile/app/index.tsx:203-210 + apps/mobile/app/_hooks/useRadioPlayer.ts:130-132
+严重程度：严重
+原因： 预加载逻辑调用 applyApiTracks([next.track], false)，而 applyApiTracks 直接执行 setServerPlaylist(mappedTracks)，会把整个播放列表替换成只含下一首的单曲列表。useRadioPlayer 内部监听 playlist 变化后执行 setTrackIndex(0)，结果是：当前曲目播到 60% 时，播放器会立刻跳到"下一首"并从头开始播，当前曲目被中断。
+
+// index.tsx 预加载路径
+applyApiTracks([next.track], false);  // ← 替换掉了整个 playlist
+
+// useRadioPlayer.ts
+useEffect(() => {
+  setTrackIndex(0);  // ← playlist 变化后重置到 0，即新的 next.track
+}, [playlist]);
+改进： 预加载时应追加而非替换，例如：
+
+apiClient.getNext().then((next) => {
+  const mapped = mapApiTrackToRadioTrack(next.track);
+  if (mapped) {
+    setServerPlaylist((prev) => {
+      if (prev.some((t) => t.url === mapped.url)) return prev;
+      return [...prev, mapped];
+    });
+  }
+});
+问题 10
+
+位置： server/src/state/radioState.ts（模块级单例）
+严重程度：一般
+原因： handleChat 没有并发保护。客户端 chatSendingRef 防止了单个 UI 重复提交，但服务端无互斥。若多个客户端同时发送请求（或网络重试），两次 LLM + 音乐解析并发执行，最后完成的那次覆盖 radioState，可能导致 DJ 文案与当前曲目不一致（文案说 A 歌，播放器放 B 歌）。
+改进： 在 handleChat 入口加简单的 Promise 队列或 isProcessing flag。
+5. 可测试性
+无任何测试文件。 整个项目没有单元测试或集成测试。
+cache.ts 设计良好：now 函数可注入，是可测试的典范。
+radioState.ts 使用模块级单例状态，无法在测试中隔离，是可测试性最差的模块。
+llmAdapter.ts 直接依赖 env 和 fetch，没有依赖注入，测试需要 mock 全局 fetch。
+建议： 至少为 cache.ts、musicResolver.ts、llmAdapter.ts 的 JSON 解析路径补充单元测试，这些是最容易出现回归的核心逻辑。
+6. 语言/框架最佳实践
+优秀实践（明确表扬）：
+
+env.ts：Zod 启动校验 + 空字符串视为未配置，是 Node.js 服务端的最佳实践。
+cache.ts：不依赖第三方包，手写 LRU+TTL，逻辑清晰，可注入时钟，设计优秀。
+llmAdapter.ts：三层 JSON 解析兜底（原始 → 去 Markdown fence → 提取 JSON 对象），sanitizeDjText 运行时清理 LLM 输出，防御性设计到位。
+client.ts：WebSocket 状态机 + 指数退避 + jitter + 双向心跳，生产级实现。
+workerProcess.ts：子进程隔离用户源脚本，是正确的安全决策。
+useRadioPlayer：shouldAutoPlayRef 正确处理了"播放中切歌继续播、暂停中切歌不自动播"的语义。
+问题 11
+
+位置： server/src/env.ts:165
+严重程度：建议
+原因： LX_BRIDGE_REQUEST_TIMEOUT_MS 的 max 设为 60000，但 positiveIntegerWithMax 的第二个参数同时也是 positiveIntegerWithDefault 里 .max(30000) 的上限。这里 LX_BRIDGE_TIMEOUT_MS 用 positiveIntegerWithMax(30000, 30000) 而 LX_BRIDGE_REQUEST_TIMEOUT_MS 用 positiveIntegerWithMax(30000, 60000)，两者上限不一致但命名相似，容易混淆配置意图。建议在 .env.example 中加注释说明两者的区别（进程级超时 vs 单次请求超时）。

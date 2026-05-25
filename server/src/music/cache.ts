@@ -21,6 +21,8 @@ export interface MusicCacheOptions {
   defaultTtlMs: number;
   /* 时钟函数，测试时可注入；默认 Date.now。 */
   now?: () => number;
+  /* 条目被删除、过期或 LRU 淘汰时触发，用于释放外部资源。 */
+  onEvict?: (key: string, value: unknown) => void;
 }
 
 export interface MusicCache<T> {
@@ -47,6 +49,14 @@ export function createMusicCache<T>(options: MusicCacheOptions): MusicCache<T> {
   const defaultTtlMs = Math.max(1, Math.floor(options.defaultTtlMs));
   const store = new Map<string, CacheEntry<T>>();
 
+  /* 删除条目并通知调用方释放关联资源。 */
+  function evict(key: string): void {
+    const entry = store.get(key);
+    if (!entry) return;
+    store.delete(key);
+    options.onEvict?.(key, entry.value);
+  }
+
   /* 命中后把条目重新插入，使其成为最新使用项。 */
   function touch(key: string, entry: CacheEntry<T>): void {
     store.delete(key);
@@ -58,7 +68,7 @@ export function createMusicCache<T>(options: MusicCacheOptions): MusicCache<T> {
     while (store.size > maxEntries) {
       const oldestKey = store.keys().next().value;
       if (oldestKey === undefined) break;
-      store.delete(oldestKey);
+      evict(oldestKey);
     }
   }
 
@@ -67,7 +77,7 @@ export function createMusicCache<T>(options: MusicCacheOptions): MusicCache<T> {
       const entry = store.get(key);
       if (!entry) return undefined;
       if (entry.expiresAt <= now()) {
-        store.delete(key);
+        evict(key);
         return undefined;
       }
       touch(key, entry);
@@ -75,14 +85,17 @@ export function createMusicCache<T>(options: MusicCacheOptions): MusicCache<T> {
     },
     set(key, value, ttlMs) {
       const ttl = Math.max(1, Math.floor(ttlMs ?? defaultTtlMs));
-      store.delete(key);
+      if (store.has(key)) evict(key);
       store.set(key, { value, expiresAt: now() + ttl });
       evictIfNeeded();
     },
     delete(key) {
-      store.delete(key);
+      evict(key);
     },
     clear() {
+      for (const key of store.keys()) {
+        evict(key);
+      }
       store.clear();
     },
     size() {

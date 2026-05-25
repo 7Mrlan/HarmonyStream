@@ -80,6 +80,8 @@ export function buildMusicIntentPrompt(input: BuildMusicIntentPromptInput): Open
         'JSON 字段必须是：{"preferredTitles":["歌名"],"searchQuery":"搜索关键词","mood":"氛围","note":"简短策略"}',
         'preferredTitles 最多 3 首；用户明确点歌时优先放原歌名。',
         '如果用户没有明确歌名，请给出适合该场景的真实歌曲名或稳定可搜索关键词。',
+        '情绪或类型请求不是歌名，例如“伤感的歌曲”“摇滚一点”“治愈歌单”；不要把“伤感/摇滚/治愈”当作 preferredTitles。',
+        '遇到情绪或类型请求时，preferredTitles 必须给真实存在且适合该氛围的具体歌曲名，searchQuery 优先用第一首歌名加歌手。',
         'searchQuery 要短，适合音乐平台搜索；可以是“歌名 歌手”或风格关键词。',
         '不要输出无法搜索的长句，不要编造不存在的具体歌曲。',
       ].join('\n'),

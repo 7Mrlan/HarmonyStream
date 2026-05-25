@@ -17,6 +17,7 @@ import {
   recordFallback,
 } from './metrics';
 import { getProviderChain } from './providerRegistry';
+import { isSameTitle } from './titleMatch';
 import type { MusicProvider, ResolvedMusicPlan } from './types';
 
 export interface ResolveTracksForChatInput {
@@ -210,21 +211,6 @@ function orderTracksByPreferredTitles(tracks: Track[], preferredTitles: string[]
   }
 
   return [...ordered, ...remaining];
-}
-
-/*
- * 宽松标题匹配。
- * 兼容 LLM 偶尔返回带空格、大小写差异或包含额外说明的曲名。
- */
-function isSameTitle(left: string, right: string): boolean {
-  const normalizedLeft = normalizeTitle(left);
-  const normalizedRight = normalizeTitle(right);
-  return normalizedLeft === normalizedRight || normalizedRight.includes(normalizedLeft);
-}
-
-/* 归一化标题用于匹配。 */
-function normalizeTitle(value: string): string {
-  return value.trim().toLowerCase();
 }
 
 export { FALLBACK_TRACKS };

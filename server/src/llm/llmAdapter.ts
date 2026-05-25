@@ -87,6 +87,42 @@ interface OpenAiChatCompletionResponse {
 }
 
 /*
+ * LLM 输出泛化类型词时的稳定兜底歌单。
+ * 只覆盖高频情绪 / 类型，避免音乐源收到“伤感”这类不可播放搜索词。
+ */
+const GENRE_INTENT_FALLBACKS: Array<{
+  keywords: string[];
+  title: string;
+  artist: string;
+  mood: string;
+}> = [
+  {
+    keywords: ['伤感', '难过', '失恋', 'emo', '悲伤', '催泪'],
+    title: '晴天',
+    artist: '周杰伦',
+    mood: '伤感',
+  },
+  {
+    keywords: ['治愈', '温柔', '放松', '安静', '睡前'],
+    title: '小幸运',
+    artist: '田馥甄',
+    mood: '治愈',
+  },
+  {
+    keywords: ['摇滚', '热血', '燃', '振奋'],
+    title: '光辉岁月',
+    artist: 'Beyond',
+    mood: '摇滚',
+  },
+  {
+    keywords: ['怀旧', '经典', '老歌'],
+    title: '海阔天空',
+    artist: 'Beyond',
+    mood: '怀旧',
+  },
+];
+
+/*
  * 生成音乐检索意图。
  * 这一步发生在真实音乐解析之前，只让 LLM 给出短搜索线索，失败时调用方回退用户原文。
  */
@@ -423,6 +459,8 @@ function normalizeMusicIntent(value: unknown, userText: string): MusicIntent | n
 
   const mood = normalizeText(value.mood, 40);
   const note = normalizeText(value.note, 120);
+  const fallbackIntent = buildGenreFallbackIntent(userText, preferredTitles, searchQuery);
+  if (fallbackIntent) return fallbackIntent;
 
   return {
     preferredTitles,
@@ -430,6 +468,43 @@ function normalizeMusicIntent(value: unknown, userText: string): MusicIntent | n
     ...(mood ? { mood } : {}),
     ...(note ? { note } : {}),
   };
+}
+
+/*
+ * 模型偶尔会把“伤感/摇滚/治愈”这类类型词当成歌名。
+ * 运行时把泛化请求兜底成具体歌曲，保证音乐源拿到可搜索的歌名。
+ */
+function buildGenreFallbackIntent(
+  userText: string,
+  preferredTitles: string[],
+  searchQuery: string,
+): MusicIntent | null {
+  const normalizedText = `${userText} ${searchQuery} ${preferredTitles.join(' ')}`.toLowerCase();
+  const fallback = GENRE_INTENT_FALLBACKS.find((item) =>
+    item.keywords.some((keyword) => normalizedText.includes(keyword.toLowerCase())),
+  );
+  if (!fallback) return null;
+
+  const hasConcreteTitle = preferredTitles.some((title) => !isGenericMusicPhrase(title));
+  if (hasConcreteTitle && !isGenericMusicPhrase(searchQuery)) return null;
+
+  return {
+    preferredTitles: [fallback.title],
+    searchQuery: `${fallback.title} ${fallback.artist}`,
+    mood: fallback.mood,
+    note: 'genre fallback selected concrete track',
+  };
+}
+
+/* 判断一个词是否仍是泛化音乐需求，而不是具体歌名。 */
+function isGenericMusicPhrase(value: string): boolean {
+  const trimmed = value.trim().toLowerCase();
+  if (!trimmed) return true;
+
+  return (
+    /^(?:伤感|悲伤|难过|失恋|emo|治愈|温柔|放松|安静|睡前|摇滚|热血|燃|怀旧|经典|老歌)$/u.test(trimmed) ||
+    /(?:歌曲|音乐|曲子|类型|风格|歌单|一些|几首|好听|适合|类似)$/u.test(trimmed)
+  );
 }
 
 /*
