@@ -13,5 +13,5 @@ export type {
   MusicSearchInput,
   ResolvedMusicPlan,
   TrackCachePolicy,
-} from '../types';
-export { MUSIC_PROVIDER_API_VERSION } from '../types';
+} from '../types.js';
+export { MUSIC_PROVIDER_API_VERSION } from '../types.js';

@@ -17,23 +17,23 @@ import type {
   SwitchModelResponse,
   Track,
 } from '@claudio/api';
-import { generateDjResponse, generateMusicIntent } from '../llm/llmAdapter';
-import { cloneTrack } from '../music/fallbackCatalog';
-import { resolveTracksForChat } from '../music/musicResolver';
-import { cancelPendingPreloads, schedulePreload } from '../music/preload';
-import { isSameTitle } from '../music/titleMatch';
+import { generateDjResponse, generateMusicIntent } from '../llm/llmAdapter.js';
+import { cloneTrack } from '../music/fallbackCatalog.js';
+import { resolveTracksForChat } from '../music/musicResolver.js';
+import { cancelPendingPreloads, schedulePreload } from '../music/preload.js';
+import { isSameTitle } from '../music/titleMatch.js';
 import {
   buildFallbackChatResponse,
   buildNoTrackChatResponse,
   buildQuickSongChatResponse,
-} from '../radio/djCopy';
+} from '../radio/djCopy.js';
 import {
   buildExplicitMusicIntent,
   buildGenreMusicIntent,
   parseExplicitSongRequest,
   parseGenreRecommendationRequest,
-} from '../radio/intentParser';
-import { nextChatId, scheduleTts } from '../tts/scheduler';
+} from '../radio/intentParser.js';
+import { nextChatId, scheduleTts } from '../tts/scheduler.js';
 
 type RadioPlaybackState = NowResponse['state'];
 
@@ -53,6 +53,7 @@ export interface ChatResult {
 }
 
 const DEFAULT_MODEL_ID = 'deepseek';
+const CHAT_TOTAL_TIMEOUT_MS = 10_000;
 
 const MODELS: ModelInfo[] = [
   {
@@ -158,10 +159,45 @@ export async function handleChat(request: ChatRequest): Promise<ChatResult> {
 
   await previousTask.catch(() => undefined);
   try {
-    return await handleChatInternal(request);
+    return await runChatWithTimeout(request);
   } finally {
     releaseTask();
   }
+}
+
+/*
+ * 给整条聊天主链路加硬超时。
+ * 外部音乐源 / LLM / 用户源脚本都属于不稳定边界；超时后必须释放 chatQueue，避免后续请求一起堵住。
+ */
+async function runChatWithTimeout(request: ChatRequest): Promise<ChatResult> {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  const timeoutResult = new Promise<ChatResult>((resolve) => {
+    timeout = setTimeout(() => {
+      console.warn(`[radio] chat timed out after ${CHAT_TOTAL_TIMEOUT_MS}ms: ${request.text.slice(0, 80)}`);
+      resolve(buildTimedOutChatResult(request.text));
+    }, CHAT_TOTAL_TIMEOUT_MS);
+  });
+
+  try {
+    return await Promise.race([handleChatInternal(request), timeoutResult]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+/*
+ * 构造聊天超时兜底响应。
+ * 保留当前播放状态，不清空曲目；只告诉用户这次外部音源解析超时，避免播放器突然掉歌。
+ */
+function buildTimedOutChatResult(text: string): ChatResult {
+  const response = buildNoTrackChatResponse(text, '外部音乐源解析超时，请稍后重试或换一个关键词。');
+  radioState.messages = [...radioState.messages, response].slice(-20);
+
+  return {
+    response,
+    currentTrack: radioState.currentTrack ? cloneTrack(radioState.currentTrack) : null,
+    queue: getQueueSnapshot(),
+  };
 }
 
 /*

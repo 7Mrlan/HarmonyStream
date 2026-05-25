@@ -12,8 +12,8 @@ import type {
   LxSourceInitResult,
   LxWorkerClient,
   LxWorkerProcessOptions,
-} from './types';
-import type { LxWorkerMessage, LxWorkerResponseMessage } from './workerProtocol';
+} from './types.js';
+import type { LxWorkerMessage, LxWorkerResponseMessage } from './workerProtocol.js';
 
 /* 创建隔离 worker 客户端。 */
 export function createLxWorkerProcess(options: LxWorkerProcessOptions): LxWorkerClient {

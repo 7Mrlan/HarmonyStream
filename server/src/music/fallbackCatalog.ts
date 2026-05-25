@@ -7,8 +7,8 @@
  */
 
 import type { Track } from '@claudio/api';
-import type { MusicProvider, MusicProviderManifest, MusicSearchInput } from './types';
-import { MUSIC_PROVIDER_API_VERSION } from './types';
+import type { MusicProvider, MusicProviderManifest, MusicSearchInput } from './types.js';
+import { MUSIC_PROVIDER_API_VERSION } from './types.js';
 
 export const FALLBACK_TRACKS: Track[] = [
   {

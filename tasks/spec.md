@@ -10,8 +10,8 @@
 
 - 当前主线：AI 电台最小闭环。
 - 已完成：Phase A 后端 API 骨架；Phase B 移动端接入；Phase C LLM 主播；Phase C+ 等待体验；Phase D 音乐来源；Phase D.5 性能地基；Phase E TTS 入声；Phase F.0 SDK 56 依赖升级；Phase F.A 音频会话/后台权限；Phase F.B WS 心跳/重连；Phase F.C 锁屏 metadata 代码接线；Phase F.D APK 构建入口；Phase F.E 服务端 graceful shutdown。
-- 当前阶段：Phase F 后台播放、锁屏控制、APK release、长时运行等产品化任务。
-- 当前 HARD-GATE：Phase H 已完成并归档；Phase F 继续以前需重新核对真机验收入口。
+- 当前阶段：Phase I 默认 LX 双源池 + FLAC 优先。
+- 当前 HARD-GATE：Phase I 处于分段 Spec；现状分析确认后才能继续功能点方案，完整 Spec 确认前禁止编码。
 - 当前边界：BYO-LLM 用户自配 key/baseUrl/model 单独作为 Phase F.5，不混入 Phase F 锁屏 / APK 验收。
 
 ---
@@ -248,3 +248,15 @@
 - 仍活跃决策：主播放按钮永远是电台总控；歌曲和主播一起暂停 / 继续，不再根据 TTS ready 或 VOICE 状态切换控制对象。
 - 仍活跃决策：VOICE 只控制主播自动播报；REPLAY 是 DJ 气泡附近的局部语音控制，歌曲按 talk-over ducking。
 - 仍活跃决策：真实切歌走 `POST /api/playback/next|previous`，服务端 currentIndex 是当前 queue 权威；失败响应保留当前 track。
+
+---
+
+## 14. Phase I：默认 LX 双源池 + FLAC 优先
+
+- 完整历史设计已拆到 `tasks/spec/phase-i-lx-dual-source-pool.md`。
+- 仍活跃决策：默认真实音乐链路为 `lx-primary -> lx-secondary -> fallback`，默认音质顺序为 `flac,320k,128k`。
+- 仍活跃决策：默认真实源文件随仓库提交，位置为 `server/assets/lx-sources/primary.js` 与 `server/assets/lx-sources/secondary.js`，保证开源用户拉取代码后只配置 LLM/TTS key 即可闭环测试。
+- 仍活跃决策：`server/data/lx-sources/*` 作为本机私有覆盖层保留，不提交 GitHub；存在私有覆盖文件时优先于 `server/assets` 内置默认源。
+- 仍活跃决策：`LX_SOURCE_SCRIPT_URL` / `LX_SOURCE_SCRIPT_FILE` 显式配置时视为用户单源覆盖，provider id 保持 `lx`。
+- 仍活跃决策：`MUSIC_PROVIDER_CHAIN=lx` 的兼容展开只允许在 `server/src/music/providerRegistry.ts` / `parseChainConfig` 内完成，避免散落逻辑。
+- 仍活跃决策：服务端 ESM 代码的相对 import 必须带 `.js` 扩展，保证 `node dist/index.js` 可直接运行。

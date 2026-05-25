@@ -8,8 +8,8 @@
  */
 
 import { randomBytes } from 'node:crypto';
-import { env } from '../env';
-import { createMusicCache, type MusicCache } from '../music/cache';
+import { env } from '../env.js';
+import { createMusicCache, type MusicCache } from '../music/cache.js';
 
 interface AudioEntry {
   buffer: Buffer;

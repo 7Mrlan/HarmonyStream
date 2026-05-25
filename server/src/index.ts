@@ -8,14 +8,14 @@
 
 import Fastify from 'fastify';
 import websocket from '@fastify/websocket';
-import { env } from './env';
-import { registerApiRoutes } from './routes/apiRoutes';
-import { registerMediaRoutes } from './routes/mediaRoutes';
-import { registerStreamRoutes } from './routes/streamRoutes';
-import { shutdownStreamHub } from './realtime/streamHub';
-import { shutdownAudioStore } from './tts/audioStore';
-import { shutdownMusicResolver } from './music/musicResolver';
-import { warmupProviderChain } from './music/providerRegistry';
+import { env } from './env.js';
+import { registerApiRoutes } from './routes/apiRoutes.js';
+import { registerMediaRoutes } from './routes/mediaRoutes.js';
+import { registerStreamRoutes } from './routes/streamRoutes.js';
+import { shutdownStreamHub } from './realtime/streamHub.js';
+import { shutdownAudioStore } from './tts/audioStore.js';
+import { shutdownMusicResolver } from './music/musicResolver.js';
+import { warmupProviderChain } from './music/providerRegistry.js';
 
 /* 创建 Fastify 实例，pino 日志开发期友好打印 */
 const app = Fastify({

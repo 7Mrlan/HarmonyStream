@@ -351,7 +351,10 @@ export function PlaybackProgressBar({
     durationSeconds.value = duration;
   }, [duration, durationSeconds]);
 
-  /* 非拖动期间，根据外部真实 position / duration 平滑追帧。 */
+  /*
+   * 非拖动期间，根据外部真实 position / duration 同步进度。
+   * 播放中用剩余时长让 UI 线程连续推进，避免真机 position 回调间隔抖动造成“走一下停一下”。
+   */
   useEffect(() => {
     const nextRatio = duration > 0 ? clamp(position / duration, 0, 1) : 0;
 
@@ -360,8 +363,20 @@ export function PlaybackProgressBar({
     }
 
     pendingProgress.value = nextRatio;
+    if (playing && duration > 0) {
+      const remainingMs = Math.max(0, (duration - position) * 1000);
+      displayProgress.value = nextRatio;
+      if (remainingMs > 0) {
+        displayProgress.value = withTiming(1, {
+          duration: remainingMs,
+          easing: Easing.linear,
+        });
+      }
+      return;
+    }
+
     displayProgress.value = withTiming(nextRatio, {
-      duration: playing ? 140 : 180,
+      duration: 180,
       easing: Easing.out(Easing.cubic),
     });
   }, [displayProgress, dragging, duration, pendingProgress, playing, position]);

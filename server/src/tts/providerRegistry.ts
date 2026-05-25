@@ -6,10 +6,10 @@
  *   - 与 server/src/music/providerRegistry.ts 同结构
  */
 
-import { env } from '../env';
-import { createDoubaoTtsProvider } from './providers/doubaoProvider';
-import { createEdgeTtsProvider } from './providers/edgeProvider';
-import type { TtsProvider } from './types';
+import { env } from '../env.js';
+import { createDoubaoTtsProvider } from './providers/doubaoProvider.js';
+import { createEdgeTtsProvider } from './providers/edgeProvider.js';
+import type { TtsProvider } from './types.js';
 
 /* 受支持的 chain 关键字。 */
 const SUPPORTED_KEYS = new Set(['edge', 'doubao']);

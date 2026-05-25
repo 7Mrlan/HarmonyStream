@@ -13,9 +13,9 @@ import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { extname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { FastifyInstance } from 'fastify';
-import { env } from '../env';
-import { findLocalEntryById } from '../music/providers/localProvider';
-import { getAudio } from '../tts/audioStore';
+import { env } from '../env.js';
+import { findLocalEntryById } from '../music/providers/localProvider.js';
+import { getAudio } from '../tts/audioStore.js';
 
 /* 常见音频 MIME 映射。 */
 const MIME_BY_EXT: Record<string, string> = {

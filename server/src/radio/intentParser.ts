@@ -3,7 +3,7 @@
  * 把用户输入转换成音乐检索意图；本模块保持纯函数，不读写 radioState。
  */
 
-import type { GenerateMusicIntentResult } from '../llm/llmAdapter';
+import type { GenerateMusicIntentResult } from '../llm/llmAdapter.js';
 
 export interface ExplicitSongRequest {
   title: string;

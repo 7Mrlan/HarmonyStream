@@ -8,9 +8,9 @@
  * 与 music/preload 同模式但完全解耦，两类资源不互相取消。
  */
 
-import { env } from '../env';
-import { broadcastStreamEvent } from '../realtime/streamHub';
-import { synthesizeForChat } from './ttsService';
+import { env } from '../env.js';
+import { broadcastStreamEvent } from '../realtime/streamHub.js';
+import { synthesizeForChat } from './ttsService.js';
 
 let currentChatId = 0;
 

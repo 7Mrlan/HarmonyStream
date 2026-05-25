@@ -11,9 +11,9 @@
 
 import { stat } from 'node:fs/promises';
 import type { Track, TrackSourceTier } from '@claudio/api';
-import { env } from '../env';
-import { findProviderById } from './providerRegistry';
-import { findLocalEntryById } from './providers/localProvider';
+import { env } from '../env.js';
+import { findProviderById } from './providerRegistry.js';
+import { findLocalEntryById } from './providers/localProvider.js';
 
 interface PreloadTask {
   /* 去重 key。 */

@@ -7,12 +7,12 @@
 
 import { readFile } from 'node:fs/promises';
 import { z } from 'zod';
-import type { MusicSearchInput } from '../types';
+import type { MusicSearchInput } from '../types.js';
 import type {
   LxCandidateSearchConfig,
   LxCandidateSearcher,
   LxMusicCandidate,
-} from './types';
+} from './types.js';
 
 const MusicCandidateSchema = z.object({
   id: z.string().min(1),

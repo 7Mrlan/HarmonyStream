@@ -9,9 +9,9 @@
  */
 
 import type { Track } from '@claudio/api';
-import { env } from '../../env';
-import type { MusicProvider, MusicProviderManifest, MusicSearchInput } from '../types';
-import { MUSIC_PROVIDER_API_VERSION } from '../types';
+import { env } from '../../env.js';
+import type { MusicProvider, MusicProviderManifest, MusicSearchInput } from '../types.js';
+import { MUSIC_PROVIDER_API_VERSION } from '../types.js';
 
 interface NcmSearchSong {
   id?: number | string;

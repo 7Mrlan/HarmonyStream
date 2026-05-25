@@ -10,11 +10,11 @@
  */
 
 import { createHash } from 'node:crypto';
-import { env } from '../env';
-import { createMusicCache, type MusicCache } from '../music/cache';
-import { recordCacheHit, recordFallback } from '../music/metrics';
-import { deleteAudio, putAudio } from './audioStore';
-import { getTtsProviderChain } from './providerRegistry';
+import { env } from '../env.js';
+import { createMusicCache, type MusicCache } from '../music/cache.js';
+import { recordCacheHit, recordFallback } from '../music/metrics.js';
+import { deleteAudio, putAudio } from './audioStore.js';
+import { getTtsProviderChain } from './providerRegistry.js';
 
 export interface TtsRequest {
   /* 待合成文本。 */

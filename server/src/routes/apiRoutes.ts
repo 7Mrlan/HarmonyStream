@@ -25,8 +25,8 @@ import {
   playNextTrack,
   playPreviousTrack,
   switchModel,
-} from '../state/radioState';
-import { broadcastStreamEvent } from '../realtime/streamHub';
+} from '../state/radioState.js';
+import { broadcastStreamEvent } from '../realtime/streamHub.js';
 
 const ChatRequestSchema = z.object({
   text: z.string().trim().min(1, 'text 不能为空'),

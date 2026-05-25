@@ -11,9 +11,9 @@ import type {
   LxMusicCandidate,
   LxResolvedUrl,
   LxSourceInitResult,
-} from '../lxBridge/types';
-import type { MusicProvider, MusicProviderManifest, MusicSearchInput } from '../types';
-import { MUSIC_PROVIDER_API_VERSION } from '../types';
+} from '../lxBridge/types.js';
+import type { MusicProvider, MusicProviderManifest, MusicSearchInput } from '../types.js';
+import { MUSIC_PROVIDER_API_VERSION } from '../types.js';
 
 const LX_MANIFEST: MusicProviderManifest = {
   id: 'lx',
@@ -31,16 +31,31 @@ const LX_MANIFEST: MusicProviderManifest = {
   urlTtlMs: 90 * 1000,
 };
 
+type LxManifestOverride = Pick<MusicProviderManifest, 'id' | 'name'> &
+  Partial<Pick<MusicProviderManifest, 'description'>>;
+
+interface ResolvedLxBridgeProviderOptions extends LxBridgeProviderOptions {
+  manifest: MusicProviderManifest;
+}
+
 /* 创建 LX Bridge provider。 */
 export function createLxBridgeProvider(options: LxBridgeProviderOptions): MusicProvider {
+  const manifest = buildManifest(options);
   return {
-    manifest: {
-      ...LX_MANIFEST,
-      urlTtlMs: options.urlTtlMs,
-    },
+    manifest,
     isEnabled: options.isEnabled,
     warmup: () => options.runtime.loadActiveSource().then(() => undefined),
-    searchPlayableTracks: (input) => searchPlayableTracks(options, input),
+    searchPlayableTracks: (input) => searchPlayableTracks({ ...options, manifest }, input),
+  };
+}
+
+/* 构造 LX provider manifest，允许多源池暴露不同 provider id 便于排查。 */
+function buildManifest(options: LxBridgeProviderOptions): MusicProviderManifest {
+  const override = options.manifest as LxManifestOverride | undefined;
+  return {
+    ...LX_MANIFEST,
+    ...(override ?? {}),
+    urlTtlMs: options.urlTtlMs,
   };
 }
 
@@ -49,7 +64,7 @@ export function createLxBridgeProvider(options: LxBridgeProviderOptions): MusicP
  * 任一步失败都抛错给 musicResolver，由上层统一记录 reason 并继续 fallback。
  */
 async function searchPlayableTracks(
-  options: LxBridgeProviderOptions,
+  options: ResolvedLxBridgeProviderOptions,
   input: MusicSearchInput,
 ): Promise<Track[]> {
   const initResult = await options.runtime.loadActiveSource();
@@ -72,7 +87,7 @@ async function searchPlayableTracks(
  * 默认源 huibq 只声明 320k/128k；换成支持 flac/hires 的源后，只要配置优先级即可自动先试无损。
  */
 async function resolveCandidateTrack(
-  options: LxBridgeProviderOptions,
+  options: ResolvedLxBridgeProviderOptions,
   initResult: LxSourceInitResult,
   candidate: LxMusicCandidate,
 ): Promise<Track | null> {
@@ -81,9 +96,11 @@ async function resolveCandidateTrack(
   for (const quality of qualities) {
     try {
       const resolved = await options.runtime.resolveMusicUrl(candidate, quality);
-      const track = resolved ? candidateToTrack(candidate, resolved) : null;
+      const track = resolved ? candidateToTrack(options.manifest, candidate, resolved) : null;
       if (track) return track;
-    } catch {
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '未知错误';
+      console.warn(`[music/lx] resolve failed: ${candidate.title} ${quality ?? 'default'}: ${message}`);
       /* 单个音质失败时尝试下一级音质；候选整体失败再交给下一候选。 */
     }
   }
@@ -115,7 +132,11 @@ function buildQualityAttempts(
  * 把 LX 解析结果映射成 Claudio Track。
  * URL 已由 worker 校验为 http(s)，这里负责元数据和缓存策略。
  */
-function candidateToTrack(candidate: LxMusicCandidate, resolved: LxResolvedUrl): Track | null {
+function candidateToTrack(
+  manifest: MusicProviderManifest,
+  candidate: LxMusicCandidate,
+  resolved: LxResolvedUrl,
+): Track | null {
   if (!resolved.url) return null;
 
   return {
@@ -127,9 +148,9 @@ function candidateToTrack(candidate: LxMusicCandidate, resolved: LxResolvedUrl):
     ...(candidate.durationMs ? { duration: Math.round(candidate.durationMs / 1000) } : {}),
     ...(resolved.quality ? { quality: resolved.quality } : {}),
     source: {
-      provider: LX_MANIFEST.id,
-      tier: LX_MANIFEST.tier,
-      cachePolicy: LX_MANIFEST.defaultCachePolicy,
+      provider: manifest.id,
+      tier: manifest.tier,
+      cachePolicy: manifest.defaultCachePolicy,
     },
     ...(resolved.expiresAt ? { expiresAt: resolved.expiresAt } : {}),
   };

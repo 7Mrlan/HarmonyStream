@@ -6,8 +6,8 @@
  * 默认输出 webm-opus；为兼容 expo-audio 与 HTML5 audio，强制选择 mp3 输出格式。
  */
 
-import type { TtsProvider, TtsSynthesizeInput, TtsSynthesizeResult } from '../types';
-import { TTS_PROVIDER_API_VERSION } from '../types';
+import type { TtsProvider, TtsSynthesizeInput, TtsSynthesizeResult } from '../types.js';
+import { TTS_PROVIDER_API_VERSION } from '../types.js';
 
 /*
  * 创建 Edge TTS provider。

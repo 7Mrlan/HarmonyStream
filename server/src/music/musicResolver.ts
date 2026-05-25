@@ -8,17 +8,17 @@
  */
 
 import type { Track } from '@claudio/api';
-import { env } from '../env';
-import { createMusicCache, type MusicCache } from './cache';
-import { cloneTrack, FALLBACK_TRACKS } from './fallbackCatalog';
+import { env } from '../env.js';
+import { createMusicCache, type MusicCache } from './cache.js';
+import { cloneTrack, FALLBACK_TRACKS } from './fallbackCatalog.js';
 import {
   measureProviderCall,
   recordCacheHit,
   recordFallback,
-} from './metrics';
-import { getProviderChain } from './providerRegistry';
-import { isSameTitle } from './titleMatch';
-import type { MusicProvider, ResolvedMusicPlan } from './types';
+} from './metrics.js';
+import { getProviderChain } from './providerRegistry.js';
+import { isSameTitle } from './titleMatch.js';
+import type { MusicProvider, ResolvedMusicPlan } from './types.js';
 
 export interface ResolveTracksForChatInput {
   /* 用户原始输入。 */

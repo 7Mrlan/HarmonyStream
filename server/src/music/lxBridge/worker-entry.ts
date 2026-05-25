@@ -7,7 +7,7 @@
 
 import { createCipheriv, createHash, publicEncrypt, randomBytes, constants } from 'node:crypto';
 import * as vm from 'node:vm';
-import { performLxRequest, type LxRequestOptions, type LxRequestResponse } from './lxRequest';
+import { performLxRequest, type LxRequestOptions, type LxRequestResponse } from './lxRequest.js';
 import type {
   LxMusicCandidate,
   LxResolveMusicUrlRequest,
@@ -15,8 +15,8 @@ import type {
   LxSourceCapability,
   LxSourceInitResult,
   LxSourceScript,
-} from './types';
-import type { LxLoadSourcePayload, LxWorkerMessage, LxWorkerResponseMessage } from './workerProtocol';
+} from './types.js';
+import type { LxLoadSourcePayload, LxWorkerMessage, LxWorkerResponseMessage } from './workerProtocol.js';
 
 interface LxUserSourceRequest {
   /* LX source key。 */

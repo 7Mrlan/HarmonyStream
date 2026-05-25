@@ -15,8 +15,8 @@ import type {
   LxSourceRuntimeConfig,
   LxSourceScript,
   LxWorkerClient,
-} from './types';
-import { createLxWorkerProcess } from './workerProcess';
+} from './types.js';
+import { createLxWorkerProcess } from './workerProcess.js';
 
 interface ActiveSourceState {
   /* 当前 worker。 */

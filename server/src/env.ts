@@ -129,7 +129,7 @@ function envBooleanWithDefault(defaultValue: boolean) {
  *   LX_METADATA_RESOLVER_URL       LX 候选搜索 resolver 根地址
  *   LX_METADATA_FIXTURE_FILE       LX 候选搜索 smoke fixture
  *   LX_ENABLE_KUWO_SEARCH          是否启用内置 Kuwo 候选搜索适配，默认启用
- *   LX_QUALITY_PREFERENCE          LX 播放 URL 解析音质优先级，例如 320k,128k
+ *   LX_QUALITY_PREFERENCE          LX 播放 URL 解析音质优先级，例如 flac,320k,128k
  *   LX_BRIDGE_TIMEOUT_MS           LX worker IPC / 脚本加载超时
  *   LX_BRIDGE_REQUEST_TIMEOUT_MS   lx.request 默认超时
  *   *_API_KEY        各 provider 的可选 key，缺失时走 mock fallback
@@ -161,9 +161,9 @@ const EnvSchema = z.object({
   LX_METADATA_RESOLVER_URL: OptionalEnvString,
   LX_METADATA_FIXTURE_FILE: OptionalEnvString,
   LX_ENABLE_KUWO_SEARCH: envBooleanWithDefault(true),
-  LX_QUALITY_PREFERENCE: envStringWithDefault('320k,128k'),
-  LX_BRIDGE_TIMEOUT_MS: positiveIntegerWithMax(30000, 30000),
-  LX_BRIDGE_REQUEST_TIMEOUT_MS: positiveIntegerWithMax(30000, 60000),
+  LX_QUALITY_PREFERENCE: envStringWithDefault('flac,320k,128k'),
+  LX_BRIDGE_TIMEOUT_MS: positiveIntegerWithMax(8000, 30000),
+  LX_BRIDGE_REQUEST_TIMEOUT_MS: positiveIntegerWithMax(5000, 60000),
   DEEPSEEK_API_KEY: OptionalEnvString,
   DEEPSEEK_BASE_URL: envStringWithDefault('https://api.deepseek.com'),
   DEEPSEEK_MODEL: envStringWithDefault('deepseek-v4-flash'),

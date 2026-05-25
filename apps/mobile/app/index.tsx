@@ -15,7 +15,7 @@
  * 数据：v1 全部使用 mock，Iter 2 起接入真实播放与对话
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from 'react';
 import { AppState, ScrollView, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -133,7 +133,17 @@ export default function HomeScreen() {
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
   const [failedArtworkUrl, setFailedArtworkUrl] = useState<string | null>(null);
   /* Phase E / H：VOICE 只决定主播是否自动播报，不再接管主播放按钮。 */
-  const [ttsEnabled, setTtsEnabled] = useState(false);
+  const [ttsEnabled, setTtsEnabledState] = useState(false);
+  const ttsEnabledRef = useRef(ttsEnabled);
+  /*
+   * VOICE 状态需要在“切换后立刻发送”的同一轮事件里可读。
+   * 用同步 ref 做权威读取，避免 handleSend 读到上一帧闭包值。
+   */
+  const setTtsEnabled = useCallback((next: SetStateAction<boolean>) => {
+    const nextValue = typeof next === 'function' ? next(ttsEnabledRef.current) : next;
+    ttsEnabledRef.current = nextValue;
+    setTtsEnabledState(nextValue);
+  }, []);
   const currentModelName = getModelDisplayName(petId, models);
   const artworkUrl = radio.track.artwork;
   const showTrackArtwork = Boolean(artworkUrl && failedArtworkUrl !== artworkUrl);
@@ -372,7 +382,7 @@ export default function HomeScreen() {
       setLatestUserMessage({ text, time: sentAt });
 
       try {
-        const response = await apiClient.sendChat({ text, voice: ttsEnabled });
+        const response = await apiClient.sendChat({ text, voice: ttsEnabledRef.current });
         setDjText(response.say);
         setDjTime(formatBubbleTime());
         setDjLoading(false);
@@ -388,7 +398,7 @@ export default function HomeScreen() {
         setChatSending(false);
       }
     },
-    [apiClient, refreshNowAndNext, ttsEnabled],
+    [apiClient, refreshNowAndNext],
   );
 
   /*

@@ -8,8 +8,8 @@
  * Phase E 完成后单独立项再实现真实端到端语音对话。
  */
 
-import type { TtsProvider } from '../types';
-import { TTS_PROVIDER_API_VERSION } from '../types';
+import type { TtsProvider } from '../types.js';
+import { TTS_PROVIDER_API_VERSION } from '../types.js';
 
 /*
  * 创建豆包 TTS provider 占位。

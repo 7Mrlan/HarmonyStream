@@ -9,7 +9,7 @@
  *   - explame.html 只作为视觉参数来源；当前实现按项目平台框架映射，不照搬 DOM 结构。
  */
 
-import { createElement, useEffect, useRef, useState } from 'react';
+import { createElement, memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, View } from 'react-native';
 import {
   Easing as ReanimatedEasing,
@@ -35,11 +35,12 @@ export interface MusicSpectrumProps {
   dimColor?: string;
   /* 保留兼容旧 props */
   gridColor?: string;
+  /* 频谱柱数量；未传时按容器宽度自适应，移动端会自动减密度。 */
+  barCount?: number;
 }
 
 type SkiaModule = typeof import('@shopify/react-native-skia');
 
-const BAR_COUNT = 48;
 const DEFAULT_WIDTH = 900;
 const DEFAULT_HEIGHT = 200;
 const BAR_GAP = 6;
@@ -100,6 +101,17 @@ function resolveBarLevel(current: number, target: number, active: boolean): numb
   return current + Math.max(easedRise, impulseRise);
 }
 
+/* 工具：按实际容器宽度决定频谱柱数量，避免手机端 48 根 Skia 节点过密导致掉帧。 */
+function resolveBarCount(containerWidth: number, explicitCount?: number): number {
+  if (explicitCount && explicitCount > 0) {
+    return Math.max(12, Math.min(48, Math.round(explicitCount)));
+  }
+  if (containerWidth < 360) return 24;
+  if (containerWidth < 520) return 32;
+  if (containerWidth < 760) return 40;
+  return 48;
+}
+
 /* 工具：按 explame.html 的 `.v-bar` 三段线性渐变创建 Web 频谱柱填充。 */
 function createWebBarGradient(
   context: CanvasRenderingContext2D,
@@ -157,6 +169,7 @@ function NativeSpectrumBar({
   skia,
   index,
   barWidth,
+  barCount,
   height,
   color,
   clock,
@@ -165,6 +178,7 @@ function NativeSpectrumBar({
   skia: SkiaModule;
   index: number;
   barWidth: number;
+  barCount: number;
   height: number;
   color: string;
   clock: SharedValue<number>;
@@ -194,7 +208,7 @@ function NativeSpectrumBar({
 
     const wave = Math.sin(now * 0.005 + index * 0.2) * 20;
     const noise = pseudoNoise(now * 0.002 + index * 3.17);
-    const centerDistance = Math.abs(index - BAR_COUNT / 2) / (BAR_COUNT / 2);
+    const centerDistance = Math.abs(index - barCount / 2) / (barCount / 2);
     const activeTarget = 20 + noise * 70 + wave;
     const idleTarget = 5;
 
@@ -252,25 +266,29 @@ function NativeSpectrumCanvas({
   height,
   color,
   activeLevel,
+  explicitBarCount,
 }: {
   skia: SkiaModule;
   containerWidth: number;
   height: number;
   color: string;
   activeLevel: SharedValue<number>;
+  explicitBarCount?: number;
 }) {
   const { Canvas, useClock } = skia;
   const clock = useClock();
-  const barWidth = Math.max(1, (containerWidth - (BAR_COUNT - 1) * BAR_GAP) / BAR_COUNT);
+  const barCount = resolveBarCount(containerWidth, explicitBarCount);
+  const barWidth = Math.max(1, (containerWidth - (barCount - 1) * BAR_GAP) / barCount);
 
   return (
     <Canvas style={{ width: '100%', height }}>
-      {Array.from({ length: BAR_COUNT }, (_, index) => (
+      {Array.from({ length: barCount }, (_, index) => (
         <NativeSpectrumBar
           key={`native-spectrum-bar-${index}`}
           skia={skia}
           index={index}
           barWidth={barWidth}
+          barCount={barCount}
           height={height}
           color={color}
           clock={clock}
@@ -286,6 +304,7 @@ function NativeMusicSpectrum({
   height = DEFAULT_HEIGHT,
   width,
   color = '#00ff9d',
+  barCount,
 }: MusicSpectrumProps) {
   const skia = getSkiaModule();
   const [containerWidth, setContainerWidth] = useState(width ?? DEFAULT_WIDTH);
@@ -342,11 +361,14 @@ function NativeMusicSpectrum({
           height={height}
           color={color}
           activeLevel={activeLevel}
+          explicitBarCount={barCount}
         />
       ) : null}
     </View>
   );
 }
+
+const MemoNativeMusicSpectrum = memo(NativeMusicSpectrum);
 
 /* 子组件：Web 端使用单 canvas 绘制，避免 CanvasKit 加载成本和大量 SVG 节点。 */
 function WebMusicSpectrum({
@@ -354,10 +376,15 @@ function WebMusicSpectrum({
   height = DEFAULT_HEIGHT,
   width,
   color = '#00ff9d',
+  barCount: explicitBarCount,
 }: MusicSpectrumProps) {
   const [containerWidth, setContainerWidth] = useState(width ?? DEFAULT_WIDTH);
-  const frequenciesRef = useRef<number[]>(new Array(BAR_COUNT).fill(0));
-  const capPositionsRef = useRef<number[]>(new Array(BAR_COUNT).fill(0));
+  const barCount = useMemo(
+    () => resolveBarCount(containerWidth, explicitBarCount),
+    [containerWidth, explicitBarCount],
+  );
+  const frequenciesRef = useRef<number[]>([]);
+  const capPositionsRef = useRef<number[]>([]);
   const rafRef = useRef<number | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const entranceStartRef = useRef<number | null>(null);
@@ -371,6 +398,10 @@ function WebMusicSpectrum({
     }
 
     const context = maybeContext;
+    if (frequenciesRef.current.length !== barCount) {
+      frequenciesRef.current = new Array(barCount).fill(0);
+      capPositionsRef.current = new Array(barCount).fill(0);
+    }
     const dpr = window.devicePixelRatio || 1;
     const pixelWidth = Math.max(1, Math.floor(containerWidth * dpr));
     const pixelHeight = Math.max(1, Math.floor(height * dpr));
@@ -392,7 +423,7 @@ function WebMusicSpectrum({
       const now = Date.now();
       const start = entranceStartRef.current ?? now;
       entranceStartRef.current = start;
-      const barWidth = Math.max(1, (containerWidth - (BAR_COUNT - 1) * BAR_GAP) / BAR_COUNT);
+      const barWidth = Math.max(1, (containerWidth - (barCount - 1) * BAR_GAP) / barCount);
       let maxMovingValue = 0;
 
       context.clearRect(0, 0, containerWidth, height);
@@ -404,7 +435,7 @@ function WebMusicSpectrum({
           const noise = Math.random();
           const wave = Math.sin(now * 0.005 + index * 0.2) * 20;
           target = 20 + noise * 70 + wave;
-          const centerDistance = Math.abs(index - BAR_COUNT / 2) / (BAR_COUNT / 2);
+          const centerDistance = Math.abs(index - barCount / 2) / (barCount / 2);
           target *= 1 - centerDistance * 0.6;
         } else {
           target = 0;
@@ -457,7 +488,7 @@ function WebMusicSpectrum({
         rafRef.current = null;
       }
     };
-  }, [active, color, containerWidth, height]);
+  }, [active, barCount, color, containerWidth, height]);
 
   return (
     <View
@@ -492,5 +523,5 @@ export function MusicSpectrum(props: MusicSpectrumProps) {
     return <WebMusicSpectrum {...props} />;
   }
 
-  return <NativeMusicSpectrum {...props} />;
+  return <MemoNativeMusicSpectrum {...props} />;
 }

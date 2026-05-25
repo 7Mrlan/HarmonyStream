@@ -9,7 +9,7 @@ import type {
   LxResolvedUrl,
   LxSourceInitResult,
   LxSourceScript,
-} from './types';
+} from './types.js';
 
 export type LxWorkerAction = 'load-source' | 'resolve-music-url' | 'destroy';
 

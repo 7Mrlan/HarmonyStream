@@ -5,7 +5,8 @@
  * 重点保持两层分离：候选搜索负责产出 musicInfo，用户源只负责把 musicInfo 解析为播放 URL。
  */
 
-import type { MusicSearchInput } from '../types';
+import type { MusicSearchInput } from '../types.js';
+import type { MusicProviderManifest } from '../types.js';
 
 export interface LxMusicCandidate {
   /* 候选曲稳定 id，由候选 resolver 或 fixture 提供。 */
@@ -130,6 +131,9 @@ export interface LxWorkerProcessOptions {
 }
 
 export interface LxBridgeProviderOptions {
+  /* provider manifest 覆盖项，用于多源池暴露不同 provider id。 */
+  manifest?: Pick<MusicProviderManifest, 'id' | 'name'> &
+    Partial<Pick<MusicProviderManifest, 'description'>>;
   /* Bridge 运行时。 */
   runtime: LxBridgeRuntime;
   /* 候选搜索器。 */

@@ -6,8 +6,8 @@
  */
 
 import type { FastifyInstance } from 'fastify';
-import { getNowPlaying, getQueueSnapshot } from '../state/radioState';
-import { registerStreamClient, sendStreamEvent } from '../realtime/streamHub';
+import { getNowPlaying, getQueueSnapshot } from '../state/radioState.js';
+import { registerStreamClient, sendStreamEvent } from '../realtime/streamHub.js';
 
 /*
  * 注册 WebSocket stream 路由。

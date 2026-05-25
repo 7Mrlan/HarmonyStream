@@ -10,13 +10,13 @@
 
 import type { Track } from '@claudio/api';
 import { z } from 'zod';
-import { env } from '../../env';
+import { env } from '../../env.js';
 import type {
   MusicProvider,
   MusicProviderManifest,
   MusicSearchInput,
-} from '../types';
-import { MUSIC_PROVIDER_API_VERSION } from '../types';
+} from '../types.js';
+import { MUSIC_PROVIDER_API_VERSION } from '../types.js';
 
 /* 默认 manifest，外部 resolver 可通过 GET /manifest 覆盖部分字段。 */
 const DEFAULT_MANIFEST: MusicProviderManifest = {

@@ -10,8 +10,8 @@ import { createHash } from 'node:crypto';
 import { readdir, stat } from 'node:fs/promises';
 import { extname, join, relative, resolve, sep } from 'node:path';
 import type { Track } from '@claudio/api';
-import type { MusicProvider, MusicProviderManifest, MusicSearchInput } from '../types';
-import { MUSIC_PROVIDER_API_VERSION } from '../types';
+import type { MusicProvider, MusicProviderManifest, MusicSearchInput } from '../types.js';
+import { MUSIC_PROVIDER_API_VERSION } from '../types.js';
 
 /* 支持的音频扩展名，PC/手机端 expo-audio 都能直接播放。 */
 const SUPPORTED_EXTS = new Set(['.mp3', '.m4a', '.flac', '.wav', '.ogg', '.aac']);

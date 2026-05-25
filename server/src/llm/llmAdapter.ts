@@ -6,8 +6,8 @@
  */
 
 import type { ChatResponse, NowResponse, Track } from '@claudio/api';
-import { env } from '../env';
-import { buildDjPrompt, buildMusicIntentPrompt } from './prompt';
+import { env } from '../env.js';
+import { buildDjPrompt, buildMusicIntentPrompt } from './prompt.js';
 
 interface ProviderConfig {
   id: string;

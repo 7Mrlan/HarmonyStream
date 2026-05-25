@@ -63,22 +63,23 @@
 
 ---
 
-## 当前任务 · Phase H（电台播放控制语义重整）
+## 当前任务 · Phase I（默认 LX 双源池 + FLAC 优先）
 
-- [x] 模型复核：确认三层模型更符合用户直觉：电台总控、歌曲队列、主播语音。
-- [x] 现状分析：写入 `tasks/spec.md` §13.2，标注文件路径和函数名。
-- [x] 补充现状：记录 `tts.ready` 在播完后变 false 导致主按钮静默切回歌曲状态。
-- [x] 功能点方案：写入 `tasks/spec.md` §13.3，覆盖电台编排、主控、主播语音、队列切歌和服务端切歌 API 选型。
-- [x] 边界补充：明确 v1 previous 只在当前 queue 内后退，next 耗尽返回 `queue exhausted`，不自动补歌。
-- [x] 风险与执行步骤：写入 `tasks/spec.md` §13.4-13.5。
-- [x] HARD-GATE：用户确认完整 Phase H Spec 后开始编码。
-- [x] 共享契约：新增 `PlaybackMoveResponse` 与 `playNext` / `playPrevious` 客户端方法。
-- [x] 服务端：新增 `currentIndex` 与 `/api/playback/next|previous`，失败响应保留当前 track。
-- [x] 移动端：新增 `useStationController`，页面按钮统一接入电台总控。
-- [x] 验证：`pnpm typecheck`、`pnpm lint`、HTTP 点歌与播放移动烟测通过。
+- [x] 本地基准：对比 `primary/primary.js` 与 `secondary/secondary.js` 的 worker 初始化、FLAC URL 解析、降级行为。
+- [x] 现状分析：写入 `tasks/spec.md` §14.1，明确当前单 LX provider / 单 runtime 边界。
+- [x] 功能点方案：设计默认双源池、源优先级、FLAC 优先级、失败降级与 env 覆盖策略。
+- [x] 风险与执行步骤：明确不提交 `server/data` 音源文件、沙箱隔离不降级、验证命令与 HTTP 烟测。
+- [x] HARD-GATE：用户确认完整 Phase I Spec 后开始编码。
+- [x] 服务端实现：接入两个本地 LX 源为默认源池，并保留用户 env 覆盖能力。
+- [x] 验证：`pnpm --filter server typecheck`、`pnpm lint`、HTTP 点歌返回 FLAC 来源 track。
 
 ### Review
 
-- `pnpm typecheck` 通过；`pnpm lint` 通过。
-- HTTP 烟测：空队列 `next/previous` 分别返回 `queue exhausted` / `queue start` 且 track 为 null。
-- HTTP 烟测：点歌“我想听周杰伦的晴天”后 `/api/now.state=playing`，失败移动响应保留当前《晴天》track。
+- `pnpm --filter server typecheck` 通过；`pnpm --filter server build` 通过；`pnpm lint` 通过。
+- 生产入口烟测：`node dist/index.js` 可启动并响应 `/health`，ESM 相对 import 扩展问题已修复。
+- HTTP 烟测：默认点歌“我想听许嵩的乌鸦”命中 `lx-primary`，`quality=flac`，`state=playing`。
+- HTTP 烟测：临时禁用 `primary.js` 后同一首歌命中 `lx-secondary`，测试结束已恢复文件。
+- HTTP 烟测：临时配置 `LX_SOURCE_SCRIPT_FILE` 后命中兼容 provider `lx`，用户自定义单源覆盖未被破坏。
+- 追加修正：默认真实源改为提交到 `server/assets/lx-sources`，`server/data/lx-sources` 作为本机私有覆盖层保留。
+- 追加验证：临时隐藏 `server/data/lx-sources/primary|secondary` 后仍命中 assets 内置 `lx-primary`，证明开源拉取代码可开箱使用默认源。
+- 追加验证：`server/data/lx-sources` 恢复后仍命中 `lx-primary`；临时 `LX_SOURCE_SCRIPT_FILE` 仍命中兼容 provider `lx`。
