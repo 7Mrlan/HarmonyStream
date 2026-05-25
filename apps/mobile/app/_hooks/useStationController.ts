@@ -162,6 +162,7 @@ export function useStationController(input: StationControllerInput): StationCont
     setLastVoiceUrl(url);
     if (!voiceEnabledRef.current) return;
     if (stationPausedRef.current) return;
+    radioRef.current.play();
     voiceRef.current.play(url);
   }, []);
 
@@ -174,6 +175,7 @@ export function useStationController(input: StationControllerInput): StationCont
     if (!url) return;
     setStationPaused(false);
     stationPausedRef.current = false;
+    radioRef.current.play();
     voiceRef.current.play(url);
   }, [setStationPaused]);
 

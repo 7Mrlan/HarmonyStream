@@ -512,6 +512,7 @@ export default function HomeScreen() {
             live
             loading={djLoading}
             voiceActive={ttsEnabled}
+            voiceDisabled={chatSending}
             onVoiceToggle={station.toggleVoiceEnabled}
             onReplay={station.replayVoice}
           />

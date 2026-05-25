@@ -24,6 +24,8 @@ export interface DJBubbleProps {
   voiceActive?: boolean;
   /* 点击 Voice 徽章切换 TTS 播报 */
   onVoiceToggle?: () => void;
+  /* Voice 徽章是否禁用；发送请求期间锁定，避免本轮 TTS 意图被误读。 */
+  voiceDisabled?: boolean;
   /* 打字机效果：true 时按字符逐个出现，速度由 typingSpeedMs 控制 */
   typing?: boolean;
   /* LLM 等待态：true 时显示电台调频加载组件，不显示本地垫话 */
@@ -74,6 +76,7 @@ export function DJBubble({
   live = false,
   voiceActive = false,
   onVoiceToggle,
+  voiceDisabled = false,
   typing = false,
   loading = false,
   typingSpeedMs = 20,
@@ -106,7 +109,9 @@ export function DJBubble({
         {/* 顶部一行：DJ 名 + Voice 状态徽章 */}
         <View className="flex-row items-center" style={{ gap: 8 }}>
           <Text className="font-pixel text-text text-base tracking-pixel">{name}</Text>
-          {showVoiceBadge ? <VoiceToggle active={voiceActive} onPress={onVoiceToggle} /> : null}
+          {showVoiceBadge ? (
+            <VoiceToggle active={voiceActive} onPress={onVoiceToggle} disabled={voiceDisabled} />
+          ) : null}
         </View>
 
         {/* 主文本或 LLM 等待态 */}
