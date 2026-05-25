@@ -13,6 +13,7 @@ import type {
   ModelsResponse,
   NextResponse,
   NowResponse,
+  PlaybackMoveResponse,
   SwitchModelResponse,
   Track,
 } from '@claudio/api';
@@ -39,6 +40,7 @@ type RadioPlaybackState = NowResponse['state'];
 interface RadioState {
   currentTrack: Track | null;
   queue: Track[];
+  currentIndex: number;
   messages: ChatResponse[];
   currentModel: string;
   playbackState: RadioPlaybackState;
@@ -73,6 +75,7 @@ const MODELS: ModelInfo[] = [
 const radioState: RadioState = {
   currentTrack: null,
   queue: [],
+  currentIndex: 0,
   messages: [],
   currentModel: DEFAULT_MODEL_ID,
   playbackState: 'idle',
@@ -131,7 +134,7 @@ export function getNowPlaying(): NowResponse {
  * 返回前调度一次轻量预热（HEAD artwork / stat 本地文件），不下载音频内容。
  */
 export function getNextTrack(): NextResponse {
-  const track = radioState.queue[1] ?? null;
+  const track = radioState.queue[radioState.currentIndex + 1] ?? null;
 
   if (track) schedulePreload(track);
 
@@ -198,6 +201,7 @@ async function handleChatInternal(request: ChatRequest): Promise<ChatResult> {
     radioState.currentTrack = null;
     radioState.playbackState = 'idle';
     radioState.queue = [];
+    radioState.currentIndex = 0;
     radioState.messages = [...radioState.messages, response].slice(-20);
 
     return {
@@ -238,6 +242,7 @@ async function handleChatInternal(request: ChatRequest): Promise<ChatResult> {
   radioState.currentTrack = currentTrack;
   radioState.playbackState = 'playing';
   radioState.queue = queue;
+  radioState.currentIndex = 0;
   radioState.messages = [...radioState.messages, response].slice(-20);
 
   /* 不阻塞 /api/chat：仅触发调度，预热在后台串行执行。 */
@@ -260,6 +265,34 @@ async function handleChatInternal(request: ChatRequest): Promise<ChatResult> {
 }
 
 /*
+ * 切到服务端当前队列的下一首。
+ * v1 只在本轮 chat 生成的队列内移动；队列耗尽时保持当前曲目不变。
+ */
+export function playNextTrack(): PlaybackMoveResponse {
+  const nextIndex = radioState.currentIndex + 1;
+
+  if (!radioState.currentTrack || nextIndex >= radioState.queue.length) {
+    return buildPlaybackMoveFailure('queue exhausted');
+  }
+
+  return moveToQueueIndex(nextIndex);
+}
+
+/*
+ * 切到服务端当前队列的上一首。
+ * v1 不跨 chat 轮次回退；已经在队首时保持当前曲目不变。
+ */
+export function playPreviousTrack(): PlaybackMoveResponse {
+  const previousIndex = radioState.currentIndex - 1;
+
+  if (!radioState.currentTrack || previousIndex < 0) {
+    return buildPlaybackMoveFailure('queue start');
+  }
+
+  return moveToQueueIndex(previousIndex);
+}
+
+/*
  * 汇总音乐解析 reason。
  * 真实 LLM 意图失败不阻断电台，只作为内部 fallback 说明保留。
  */
@@ -279,7 +312,55 @@ function buildMusicReason(
  * WebSocket 广播时使用拷贝，避免外部持有内部数组引用。
  */
 export function getQueueSnapshot(): Track[] {
-  return radioState.queue.map((track) => ({ ...track }));
+  return getQueueFromCurrentIndex();
+}
+
+/*
+ * 把服务端队列移动到指定位置。
+ * 内部队列保留完整顺序，对外返回从当前曲目开始的队列，方便客户端直接渲染。
+ */
+function moveToQueueIndex(index: number): PlaybackMoveResponse {
+  const track = radioState.queue[index] ?? null;
+
+  if (!track) {
+    return buildPlaybackMoveFailure('queue exhausted');
+  }
+
+  cancelPendingPreloads();
+  radioState.currentIndex = index;
+  radioState.currentTrack = cloneTrack(track);
+  radioState.playbackState = 'playing';
+
+  const nextTrack = radioState.queue[radioState.currentIndex + 1] ?? null;
+  if (nextTrack) schedulePreload(nextTrack);
+
+  return {
+    ok: true,
+    track: cloneTrack(radioState.currentTrack),
+    queue: getQueueFromCurrentIndex(),
+  };
+}
+
+/*
+ * 构造播放移动失败响应。
+ * 失败时必须保留未改变的 currentTrack，避免客户端误以为当前曲目被清空。
+ */
+function buildPlaybackMoveFailure(reason: string): PlaybackMoveResponse {
+  return {
+    ok: false,
+    reason,
+    track: radioState.currentTrack ? cloneTrack(radioState.currentTrack) : null,
+    queue: getQueueFromCurrentIndex(),
+  };
+}
+
+/*
+ * 返回客户端可直接播放的队列快照。
+ * currentIndex 之前的历史不推给客户端，上一首由服务端 API 负责，避免前后端索引分叉。
+ */
+function getQueueFromCurrentIndex(): Track[] {
+  const startIndex = Math.max(0, Math.min(radioState.currentIndex, radioState.queue.length));
+  return radioState.queue.slice(startIndex).map(cloneTrack);
 }
 
 /*

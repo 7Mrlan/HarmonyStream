@@ -43,6 +43,8 @@ export interface RadioPlayerState {
   duration: number;
   /* 是否处于缓冲态 */
   buffering: boolean;
+  /* 播放器底层错误；为空表示没有可见错误 */
+  error: string | null;
 }
 
 export interface RadioPlayerActions {
@@ -75,6 +77,11 @@ export interface RadioPlayerLockScreenBridge {
 }
 
 /* 把播放器状态时间统一转换成 UI 使用的秒。 */
+export interface RadioPlayerOptions {
+  /* 切换音源时是否自动播放；整站暂停时由上层关闭，避免换歌后偷偷出声。 */
+  autoPlayOnTrackChange?: boolean;
+}
+
 function fromPlayerTime(value: number | undefined): number {
   if (value === undefined || !Number.isFinite(value) || value < 0) return 0;
   return value;
@@ -93,7 +100,10 @@ function toPlayerTime(seconds: number): number {
  */
 export function useRadioPlayer(
   playlist: RadioTrack[] = [],
+  options: RadioPlayerOptions = {},
 ): RadioPlayerState & RadioPlayerActions & RadioPlayerLockScreenBridge {
+  /* 上层编排后的自动播放意图，默认保持旧行为：新曲到达后自动播放。 */
+  const autoPlayOnTrackChange = options.autoPlayOnTrackChange ?? true;
   /* 当前播放索引 */
   const [trackIndex, setTrackIndex] = useState(0);
   /*
@@ -104,6 +114,11 @@ export function useRadioPlayer(
   const shouldAutoPlayRef = useRef(false);
   /* 最近一次自动播放过的 URL，避免重渲染重复触发 play。 */
   const lastAutoPlayedUrlRef = useRef<string | null>(null);
+  /*
+   * 用户或新曲到达后的目标播放状态。
+   * expo-audio 在 Web/Native 上都可能先进入 loading，再异步变成可播；这个 ref 让加载完成后能补一次 play。
+   */
+  const wantsToPlayRef = useRef(false);
 
   /* 当前曲目（playlist 为空时只给占位信息，不指向任何音频 URL）。 */
   const track = useMemo<RadioTrack>(
@@ -131,48 +146,90 @@ export function useRadioPlayer(
     setTrackIndex(0);
   }, [playlist]);
 
+  const requestPlay = useCallback(() => {
+    if (!track.url) return;
+    wantsToPlayRef.current = true;
+    try {
+      player.play();
+    } catch {
+      /* 播放失败时保留 wantsToPlay；加载完成或用户再次点击时会重试。 */
+    }
+  }, [player, track.url]);
+
   useEffect(() => {
     if (!track.url) {
+      wantsToPlayRef.current = false;
       lastAutoPlayedUrlRef.current = null;
+      return;
+    }
+    if (!autoPlayOnTrackChange) {
+      wantsToPlayRef.current = false;
+      lastAutoPlayedUrlRef.current = track.url;
       return;
     }
     if (lastAutoPlayedUrlRef.current === track.url) return;
     lastAutoPlayedUrlRef.current = track.url;
-    player.play();
-  }, [player, track.url]);
+    requestPlay();
+  }, [autoPlayOnTrackChange, requestPlay, track.url]);
 
   useEffect(() => {
     if (!shouldAutoPlayRef.current) return;
     shouldAutoPlayRef.current = false;
-    player.play();
-  }, [player, track.url]);
+    requestPlay();
+  }, [requestPlay, track.url]);
+
+  useEffect(() => {
+    if (!track.url) return;
+    if (!wantsToPlayRef.current) return;
+    if (status.playing) return;
+    if (!status.isLoaded || status.error) return;
+
+    try {
+      player.play();
+    } catch {
+      /* 个别平台仍可能要求用户手势；下一次点击播放会再次调用 requestPlay。 */
+    }
+  }, [player, status.error, status.isLoaded, status.playing, track.url]);
 
   const restartAndPlay = useCallback(() => {
+    if (!track.url) return;
+    wantsToPlayRef.current = true;
     /* 播完后再次播放要先回到 0 秒，否则部分平台会停在末尾不触发可见反馈。 */
-    void player.seekTo(0).then(() => {
-      player.play();
-    });
-  }, [player]);
+    void player
+      .seekTo(0)
+      .catch(() => undefined)
+      .finally(() => {
+        requestPlay();
+      });
+  }, [player, requestPlay, track.url]);
 
   const toggle = useCallback(() => {
     if (ended) {
       restartAndPlay();
       return;
     }
-    if (status.playing) player.pause();
-    else player.play();
-  }, [ended, player, restartAndPlay, status.playing]);
+    if (status.playing) {
+      wantsToPlayRef.current = false;
+      player.pause();
+      return;
+    }
+    requestPlay();
+  }, [ended, player, requestPlay, restartAndPlay, status.playing]);
 
   const play = useCallback(() => {
     if (ended) {
       restartAndPlay();
       return;
     }
-    player.play();
-  }, [ended, player, restartAndPlay]);
-  const pause = useCallback(() => player.pause(), [player]);
+    requestPlay();
+  }, [ended, requestPlay, restartAndPlay]);
+  const pause = useCallback(() => {
+    wantsToPlayRef.current = false;
+    player.pause();
+  }, [player]);
 
   const stop = useCallback(() => {
+    wantsToPlayRef.current = false;
     player.pause();
     void player.seekTo(0);
   }, [player]);
@@ -187,13 +244,15 @@ export function useRadioPlayer(
 
   const next = useCallback(() => {
     if (playlist.length === 0) return;
-    shouldAutoPlayRef.current = status.playing;
+    shouldAutoPlayRef.current = status.playing || wantsToPlayRef.current;
+    wantsToPlayRef.current = shouldAutoPlayRef.current;
     setTrackIndex((i) => (i + 1) % playlist.length);
   }, [playlist.length, status.playing]);
 
   const prev = useCallback(() => {
     if (playlist.length === 0) return;
-    shouldAutoPlayRef.current = status.playing;
+    shouldAutoPlayRef.current = status.playing || wantsToPlayRef.current;
+    wantsToPlayRef.current = shouldAutoPlayRef.current;
     setTrackIndex((i) => (i - 1 + playlist.length) % playlist.length);
   }, [playlist.length, status.playing]);
 
@@ -220,7 +279,8 @@ export function useRadioPlayer(
     ended,
     position: positionSeconds,
     duration: durationSeconds,
-    buffering: !status.isLoaded,
+    buffering: Boolean(track.url) && !status.isLoaded && !status.error,
+    error: status.error,
     toggle,
     play,
     pause,

@@ -10,9 +10,9 @@
 
 - 当前主线：AI 电台最小闭环。
 - 已完成：Phase A 后端 API 骨架；Phase B 移动端接入；Phase C LLM 主播；Phase C+ 等待体验；Phase D 音乐来源；Phase D.5 性能地基；Phase E TTS 入声；Phase F.0 SDK 56 依赖升级；Phase F.A 音频会话/后台权限；Phase F.B WS 心跳/重连；Phase F.C 锁屏 metadata 代码接线；Phase F.D APK 构建入口；Phase F.E 服务端 graceful shutdown。
-- 当前阶段：Phase G Spec（LX-compatible 音乐源 Bridge 设计）。
-- 当前 HARD-GATE：§9 为当前 Phase F 真源；旧的 SDK55 / `react-native-track-player` 方案已经废弃。
-- 当前边界：Android 真机锁屏 / APK 验收暂缓；先设计真实音乐源入口；BYO-LLM 用户自配 key/baseUrl/model 单独作为 Phase F.5，不混入 Phase G。
+- 当前阶段：Phase F 后台播放、锁屏控制、APK release、长时运行等产品化任务。
+- 当前 HARD-GATE：Phase H 已完成并归档；Phase F 继续以前需重新核对真机验收入口。
+- 当前边界：BYO-LLM 用户自配 key/baseUrl/model 单独作为 Phase F.5，不混入 Phase F 锁屏 / APK 验收。
 
 ---
 
@@ -87,6 +87,9 @@
 - NCM 属于 experimental provider：必须用户显式配置，不能成为隐式默认；外部源默认短 TTL，不做音频持久缓存。
 - 自有源 Range route：`/media/local/:id` 必须做路径逃逸校验（`path.relative` + `isAbsolute`），不允许 `indexOf` 判断。
 - 客户端预热触发口径：进度 ≥60% 或剩余 ≤45s；用 `useRef` 防止同首歌重复触发；失败静默。
+- 服务端是歌曲队列权威：真实切歌走 `POST /api/playback/next` / `POST /api/playback/previous`，`/api/next` 只保留预览 / 预热语义。
+- 当前播放队列 v1 只维护本轮 chat queue 的 `currentIndex`；`previous` 不跨 chat 轮次，`next` 耗尽不自动补歌、不触发 LLM。
+- 播放移动失败响应必须保留未改变的 `currentTrack`；只有本身无当前曲时才返回 `track: null`，避免客户端丢失曲目信息。
 - env helper 量纲分离：HTTP 超时类用 `positiveIntegerWithDefault`；缓存 TTL / 计数类用 `positiveIntegerWithMax(default, max)`。
 - 真实音乐源失败不能影响 LLM 主播和播放闭环：搜索、取 URL、超时、非 2xx 时统一回退 SoundHelix fallback。
 - 默认音乐源策略：系统默认启用已验证的 LX-compatible 真实音乐链路（huibq 源 raw URL + Kuwo 候选搜索），失败时仍回退 SoundHelix；用户可通过 `LX_SOURCE_SCRIPT_URL` / `LX_SOURCE_SCRIPT_FILE` / `LX_METADATA_RESOLVER_URL` / `LX_ENABLE_KUWO_SEARCH` 覆盖或关闭默认行为。
@@ -99,6 +102,8 @@
 - TTS 永远 fire-and-forget：HTTP 立返、WS 后推 `tts-ready`；任何同步等待 TTS 都违反主链路非阻塞约束。
 - TTS 与音乐播放器物理隔离：`useTtsPlayer` 独立 expo-audio 实例，不复用 `useRadioPlayer`。
 - TTS 期间走 `radio.setVolume(0.24)` ducking，结束后恢复 `1`；不暂停主音乐，不改变音乐音调。
+- 主播放按钮永远是电台总控：暂停 / 继续歌曲和主播，不因 `tts.ready`、`didJustFinish` 或 VOICE 状态隐式改变控制对象。
+- VOICE ON/OFF 只决定后续主播是否自动播报；VOICE OFF 不停止歌曲，迟到 `tts-ready` 只缓存不自动播放。
 - 失败完全静默：TTS 链路失败不发错误事件、不显示 UI 错误，DJ 文案仍可见；服务端打 `[tts]` 日志即可。
 - 公开契约不再扩展：`ChatRequest.voice?` 与 `StreamEvent 'tts-ready'` 已足够；后续接新 provider 不新增字段。
 - React Hooks 死循环防御：跨渲染状态变化的对象禁止直接进 `useEffect/useCallback` 依赖；用 `useRef` 锁住。
@@ -132,6 +137,7 @@
 | Phase D | 完成 | 服务端 `musicResolver` + fallback catalog + 可选 `ncm` provider；移动端 artwork 链路打通。 |
 | Phase D.5 | 完成 | provider chain、TTL/LRU cache、Range route、客户端 60% 预热、metrics 已落地。 |
 | Phase E | 完成 | `msedge-tts` 接入；`tts-ready`、`/media/tts/:id`、独立 `useTtsPlayer`、DJBubble REPLAY 已落地。 |
+| Phase H | 完成 | 电台总控 / 歌曲队列 / 主播语音三层语义落地；完整历史见 `tasks/spec/phase-h-radio-playback-controls.md`。 |
 | Phase F.0 | 完成 | Expo SDK 56 / React 19.2.6 / RN 0.85.3 / TypeScript 6.0.3 升级完成；NativeWind 类型 shim 和临时 override 已清理。 |
 | Phase F.5 | 待启动 | BYO-LLM：用户自配 API key / baseUrl / model / provider 参数；必须单独立 Spec，不并入 Phase F.D。 |
 
@@ -229,66 +235,16 @@
 
 ## 12. radioState God Object 拆分
 
-### 12.1 现状分析（已确认）
+- 完整历史设计已拆到 `tasks/spec/phase-radio-state-split.md`。
+- 仍活跃决策：`server/src/radio/intentParser.ts` 负责输入意图解析纯逻辑。
+- 仍活跃决策：`server/src/radio/djCopy.ts` 负责 DJ fallback / 快速文案模板。
+- 仍活跃决策：`server/src/state/radioState.ts` 继续作为路由层 facade，保留状态与编排，对外 API 不变。
 
-- `server/src/state/radioState.ts` 当前同时承担内存状态、API facade、聊天编排、点歌 / 类型意图解析、DJ fallback 文案、队列构建、预热和 TTS 调度触发。
-- `handleChat()` / `handleChatInternal()` 是当前复杂度集中点；路由层只依赖 `radioState.ts` 的公开导出，适合保持 facade 不变、内部拆纯函数。
-- 新增情绪推荐逻辑后，`radioState.ts` 继续膨胀，说明该问题会随功能增长加重，越早拆分越便宜。
+---
 
-### 12.2 功能点与文件计划（已确认）
+## 13. Phase H：电台播放控制语义重整
 
-- 新增 `server/src/radio/intentParser.ts`，只负责“用户输入 → 音乐意图”的纯逻辑。
-  - 导出：
-    ```ts
-    export interface ExplicitSongRequest { ... }
-    export interface GenreRecommendationRequest { ... }
-    export function parseExplicitSongRequest(text: string): ExplicitSongRequest | null;
-    export function parseGenreRecommendationRequest(text: string): GenreRecommendationRequest | null;
-    export function buildExplicitMusicIntent(request: ExplicitSongRequest): GenerateMusicIntentResult;
-    export function buildGenreMusicIntent(request: GenreRecommendationRequest): GenerateMusicIntentResult;
-    ```
-  - 内部函数 / 常量：`GENRE_RECOMMENDATIONS`、`isRecommendationPhrase()`、`trimSongPhrase()`。
-- 新增 `server/src/radio/djCopy.ts`，只负责 DJ fallback / 快速文案模板。
-  - 导出：
-    ```ts
-    export function buildQuickSongChatResponse(text: string, track: Track, musicReason: string): ChatResponse;
-    export function buildFallbackChatResponse(
-      text: string,
-      track: Track,
-      modelDisplayName: string,
-      llmFallbackReason?: string,
-      musicFallbackReason?: string,
-    ): ChatResponse;
-    export function buildNoTrackChatResponse(text: string, musicFallbackReason: string): ChatResponse;
-    ```
-  - 内部函数：`buildSongIntro()`、`buildSongSegue()`、`pickStableTemplate()`、`buildMockDjScript()`。
-  - `buildMockDjScript()` 必须从直接读取 `radioState.currentModel` 改为接收 `modelDisplayName: string` 参数；调用方用 `handleChatInternal()` 已有的 `currentModel.displayName` 传入。
-- `server/src/state/radioState.ts` 保留内存状态、公开 API facade 和主流程编排。
-  - 对外导出签名保持不变：`getModels()`、`switchModel()`、`getNowPlaying()`、`getNextTrack()`、`handleChat()`、`getQueueSnapshot()`。
-  - 不改 `server/src/routes/apiRoutes.ts`、`server/src/routes/streamRoutes.ts`、`packages/api` 契约和移动端调用。
-
-### 12.3 风险与决策
-
-- 决策：本次只做纯函数迁移和参数化，不改产品语义、不改 HTTP API、不改 LLM / 音乐 provider 行为。
-- 决策：不引入 class、DI 容器或持久化状态；`radioState.ts` 仍是路由层唯一入口。
-- 决策：`buildQueue()`、`chooseTrackFromPlay()` 暂留 `radioState.ts`，因为它们直接服务于状态提交；后续如要补单元测试，再考虑抽成 `queuePlan.ts`。
-- 风险：搬移函数时容易漏 export 或 import；用 `pnpm typecheck:server` 作为第一道验证。
-- 风险：`buildFallbackChatResponse()` 参数顺序变更可能造成文案 fallback reason 丢失；执行时只在 `handleChatInternal()` 一处改调用，并保留原 reason 组合。
-- 风险：文件移动后 tsx watch 会热重载后端；若正在使用前端联调，浏览器可能需要硬刷新或重发请求，但不涉及 Metro 缓存陷阱，因为本次只改服务端。
-
-### 12.4 执行步骤（HARD-GATE 后）
-
-1. 新建 `server/src/radio/intentParser.ts`，从 `radioState.ts` 迁移意图解析相关类型、常量和函数。
-   - 验证：终端命令 `pnpm typecheck:server`。
-2. 新建 `server/src/radio/djCopy.ts`，迁移 DJ 文案相关函数，并把 `buildMockDjScript()` 参数化为 `modelDisplayName`。
-   - 验证：终端命令 `pnpm typecheck:server`。
-3. 更新 `server/src/state/radioState.ts` imports 和调用点，删除已迁移的本地函数。
-   - 验证：终端命令 `pnpm typecheck:server`。
-4. 全量静态验证。
-   - 终端命令：`pnpm typecheck`
-   - 终端命令：`pnpm lint`
-5. 主链路烟测。
-   - 终端命令：`/health` 验证服务端仍运行。
-   - 终端命令：请求 `/api/chat`，确认返回有效 `ChatResponse`：`say` 非空、`play` 为数组。
-   - 终端命令：请求 `/api/now`，确认 `track` 非 null 且 `state` 为 `playing`。
-   - 终端命令：请求 `/api/chat` 输入“我想听周杰伦的晴天”，确认明确点歌快路径仍返回 `play[0] = 晴天`。
+- 完整历史设计已拆到 `tasks/spec/phase-h-radio-playback-controls.md`。
+- 仍活跃决策：主播放按钮永远是电台总控；歌曲和主播一起暂停 / 继续，不再根据 TTS ready 或 VOICE 状态切换控制对象。
+- 仍活跃决策：VOICE 只控制主播自动播报；REPLAY 是 DJ 气泡附近的局部语音控制，歌曲按 talk-over ducking。
+- 仍活跃决策：真实切歌走 `POST /api/playback/next|previous`，服务端 currentIndex 是当前 queue 权威；失败响应保留当前 track。

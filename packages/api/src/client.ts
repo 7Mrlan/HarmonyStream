@@ -11,6 +11,7 @@ import type {
   ModelsResponse,
   NextResponse,
   NowResponse,
+  PlaybackMoveResponse,
   StreamEvent,
   SwitchModelResponse,
 } from './types';
@@ -49,6 +50,10 @@ export interface ClaudioApiClient {
   getNow: () => Promise<NowResponse>;
   /* 获取下一首 */
   getNext: () => Promise<NextResponse>;
+  /* 切到服务端队列中的下一首 */
+  playNext: () => Promise<PlaybackMoveResponse>;
+  /* 切到服务端队列中的上一首 */
+  playPrevious: () => Promise<PlaybackMoveResponse>;
   /* 发送聊天 */
   sendChat: (request: ChatRequest) => Promise<ChatResponse>;
   /* 获取模型列表 */
@@ -109,6 +114,14 @@ export function createApiClient(options: ApiClientOptions = {}): ClaudioApiClien
   return {
     getNow: () => requestJson<NowResponse>(fetcher, baseUrl, '/api/now'),
     getNext: () => requestJson<NextResponse>(fetcher, baseUrl, '/api/next'),
+    playNext: () =>
+      requestJson<PlaybackMoveResponse>(fetcher, baseUrl, '/api/playback/next', {
+        method: 'POST',
+      }),
+    playPrevious: () =>
+      requestJson<PlaybackMoveResponse>(fetcher, baseUrl, '/api/playback/previous', {
+        method: 'POST',
+      }),
     sendChat: (request) =>
       requestJson<ChatResponse>(fetcher, baseUrl, '/api/chat', {
         method: 'POST',

@@ -46,6 +46,7 @@ import {
 import { getApiBaseUrl } from './_config/api';
 import { useNowPlayingMedia } from './_hooks/useNowPlayingMedia';
 import { useRadioPlayer, type RadioTrack } from './_hooks/useRadioPlayer';
+import { useStationController } from './_hooks/useStationController';
 import { useTtsPlayer } from './_hooks/useTtsPlayer';
 import { mapApiTrackToRadioTrack, mapApiTracksToRadioTracks } from './_utils/trackMapping';
 
@@ -104,8 +105,10 @@ export default function HomeScreen() {
   const [models, setModels] = useState<ModelInfo[]>([]);
   /* 服务端曲目队列。为空时播放器保持空信号，不播放本地 demo 曲。 */
   const [serverPlaylist, setServerPlaylist] = useState<RadioTrack[]>([]);
+  /* Phase H：整站暂停态；暂停时换歌只换曲目信息，不自动出声。 */
+  const [stationPaused, setStationPaused] = useState(false);
   /* 真实音频播放引擎：只消费服务端下发的真实曲目。 */
-  const radio = useRadioPlayer(serverPlaylist);
+  const radio = useRadioPlayer(serverPlaylist, { autoPlayOnTrackChange: !stationPaused });
   const { setVolume } = radio;
   /* Phase F：把当前曲目同步给系统锁屏 / 媒体会话，用于后台播放和锁屏展示。 */
   useNowPlayingMedia({
@@ -115,15 +118,6 @@ export default function HomeScreen() {
   });
   /* Phase E：独立 TTS 播放器；与 radio 完全隔离，避免 DJ 一开口就打断当前歌曲 */
   const tts = useTtsPlayer();
-  /*
-   * tts 对象引用在 useTtsPlayer 内每次渲染都会变化（playing 状态切换会触发新对象）。
-   * handleStreamEvent / bootstrap useEffect 不能直接依赖 tts，否则每次状态变化都会重连 WS、重新拉 /api/now+models，
-   * 引发"每秒几十个请求"的死循环。这里用 ref 把 tts 锁住，事件处理读 ref.current 即可。
-   */
-  const ttsRef = useRef(tts);
-  useEffect(() => {
-    ttsRef.current = tts;
-  }, [tts]);
   /* 播放器动画只在真实播放且未结束时运行，暂停/播完进入 idle 收尾态。 */
   const animationActive = radio.playing && !radio.ended;
   const [faved, setFaved] = useState(false);
@@ -138,10 +132,8 @@ export default function HomeScreen() {
   const [latestUserMessage, setLatestUserMessage] = useState<UserMessage | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
   const [failedArtworkUrl, setFailedArtworkUrl] = useState<string | null>(null);
-  /* Phase E：voice 开关；默认关闭，避免首次启动突然出声。点击 ChatInput 旁的喇叭切换。 */
+  /* Phase E / H：VOICE 只决定主播是否自动播报，不再接管主播放按钮。 */
   const [ttsEnabled, setTtsEnabled] = useState(false);
-  /* 最近一次收到的 tts-ready URL，DJBubble onReplay 用它再次触发播放。 */
-  const [lastTtsUrl, setLastTtsUrl] = useState<string | null>(null);
   const currentModelName = getModelDisplayName(petId, models);
   const artworkUrl = radio.track.artwork;
   const showTrackArtwork = Boolean(artworkUrl && failedArtworkUrl !== artworkUrl);
@@ -196,6 +188,22 @@ export default function HomeScreen() {
     const [now, next] = await Promise.all([apiClient.getNow(), apiClient.getNext()]);
     applyApiTracks([now.track, next.track], true);
   }, [apiClient, applyApiTracks]);
+
+  /*
+   * Phase H：统一整站播放编排。
+   * 页面层只把按钮和事件接到 controller，不再自己判断“当前按钮该控主播还是歌曲”。
+   */
+  const station = useStationController({
+    apiClient,
+    radio,
+    voice: tts,
+    voiceEnabled: ttsEnabled,
+    setVoiceEnabled: setTtsEnabled,
+    stationPaused,
+    setStationPaused,
+    applyApiTracks,
+  });
+  const { playVoice } = station;
 
   /*
    * 同一首歌只触发一次预热：用 ref 记录已经发起预热的 track url。
@@ -258,17 +266,15 @@ export default function HomeScreen() {
 
       if (event.type === 'tts-ready') {
         /*
-         * Phase E：tts-ready 收到 url 后立即播放。
-         * 服务端可能给绝对 URL 或相对路径，相对路径需要拼上 baseUrl。
-         * 使用 ttsRef 避免把 tts 加进 useCallback 依赖，否则会拖累 bootstrap useEffect 反复重连。
+         * Phase H：tts-ready 只交给整站 controller。
+         * controller 会按 VOICE 与整站暂停状态决定是否自动播放主播。
          */
         const baseUrl = getApiBaseUrl();
         const fullUrl = /^https?:\/\//i.test(event.url) ? event.url : `${baseUrl}${event.url}`;
-        setLastTtsUrl(fullUrl);
-        ttsRef.current.play(fullUrl);
+        playVoice(fullUrl);
       }
     },
-    [applyApiTracks],
+    [applyApiTracks, playVoice],
   );
 
   useEffect(() => {
@@ -346,8 +352,8 @@ export default function HomeScreen() {
    * 仅观察 tts.playing 切换；setVolume 内部已做平台兜底。
    */
   useEffect(() => {
-    setVolume(tts.playing ? TTS_DUCKING_VOLUME : 1);
-  }, [setVolume, tts.playing]);
+    setVolume(station.musicDucked ? TTS_DUCKING_VOLUME : 1);
+  }, [setVolume, station.musicDucked]);
 
   /*
    * 发送用户输入到服务端。
@@ -384,21 +390,6 @@ export default function HomeScreen() {
     },
     [apiClient, refreshNowAndNext, ttsEnabled],
   );
-
-  /*
-   * DJBubble 重播按钮：再次播放最近一次 tts-ready 的音频。
-   * 没有最近 TTS 时按钮无效，不触发任何动作。
-   * 走 ttsRef 防止把 tts 加进 useCallback 依赖。
-   */
-  const handleReplayTts = useCallback(() => {
-    if (!lastTtsUrl) return;
-    ttsRef.current.play(lastTtsUrl);
-  }, [lastTtsUrl]);
-
-  /* Voice 徽章点击切换 TTS 播报开关，发送 chat 时再按当前状态透传给服务端。 */
-  const handleVoiceToggle = useCallback(() => {
-    setTtsEnabled((value) => !value);
-  }, []);
 
   /*
    * 切换服务端模型。
@@ -481,7 +472,7 @@ export default function HomeScreen() {
             title={radio.track.title}
             artist={radio.track.artist}
             playing={radio.playing}
-            state={radio.buffering ? 'BUFFERING' : undefined}
+            state={radio.error ? 'ERROR' : radio.buffering ? 'BUFFERING' : undefined}
           />
 
           {/* 律动主视觉：用户原版 48 根霓虹频谱条，跟随真实播放状态律动 */}
@@ -503,13 +494,13 @@ export default function HomeScreen() {
 
           {/* 8 按钮控件 — 接到真实播放引擎 */}
           <PlayerControls
-            playing={animationActive}
+            playing={station.stationPlaying}
             ended={radio.ended}
             faved={faved}
-            onPrev={radio.prev}
-            onPlayPause={radio.toggle}
-            onNext={radio.next}
-            onStop={radio.stop}
+            onPrev={station.previousTrack}
+            onPlayPause={station.toggleStation}
+            onNext={station.nextTrack}
+            onStop={station.stopStation}
             onFav={() => setFaved((f) => !f)}
             onActionFeedback={triggerPetAction}
           />
@@ -521,8 +512,8 @@ export default function HomeScreen() {
             live
             loading={djLoading}
             voiceActive={ttsEnabled}
-            onVoiceToggle={handleVoiceToggle}
-            onReplay={handleReplayTts}
+            onVoiceToggle={station.toggleVoiceEnabled}
+            onReplay={station.replayVoice}
           />
 
           {/* 用户短回复气泡 */}

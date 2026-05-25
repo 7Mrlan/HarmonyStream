@@ -11,7 +11,9 @@ import type {
   ModelsResponse,
   NextResponse,
   NowResponse,
+  PlaybackMoveResponse,
   SwitchModelResponse,
+  Track,
 } from '@claudio/api';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -20,6 +22,8 @@ import {
   getNextTrack,
   getNowPlaying,
   handleChat,
+  playNextTrack,
+  playPreviousTrack,
   switchModel,
 } from '../state/radioState';
 import { broadcastStreamEvent } from '../realtime/streamHub';
@@ -44,6 +48,18 @@ export function registerApiRoutes(app: FastifyInstance): void {
 
   app.get('/api/next', async (): Promise<NextResponse> => {
     return getNextTrack();
+  });
+
+  app.post('/api/playback/next', async (): Promise<PlaybackMoveResponse> => {
+    const result = playNextTrack();
+    broadcastPlaybackMove(result);
+    return result;
+  });
+
+  app.post('/api/playback/previous', async (): Promise<PlaybackMoveResponse> => {
+    const result = playPreviousTrack();
+    broadcastPlaybackMove(result);
+    return result;
   });
 
   app.get('/api/models', async (): Promise<ModelsResponse> => {
@@ -92,13 +108,35 @@ export function registerApiRoutes(app: FastifyInstance): void {
       queue: result.queue,
     });
     if (result.currentTrack) {
-      broadcastStreamEvent({
-        type: 'now-playing',
-        track: result.currentTrack,
-        position: 0,
-      });
+      broadcastNowPlaying(result.currentTrack);
     }
 
     return result.response;
+  });
+}
+
+/*
+ * 广播服务端真实切歌结果。
+ * 失败分支不广播，避免前端把“未移动”误解为新的播放事件。
+ */
+function broadcastPlaybackMove(result: PlaybackMoveResponse): void {
+  if (!result.ok) return;
+
+  broadcastNowPlaying(result.track);
+  broadcastStreamEvent({
+    type: 'queue-update',
+    queue: result.queue,
+  });
+}
+
+/*
+ * 广播当前播放曲目。
+ * position 仍由 Phase A 内存状态固定为 0，后续真机播放进度再接入真实上报。
+ */
+function broadcastNowPlaying(track: Track): void {
+  broadcastStreamEvent({
+    type: 'now-playing',
+    track,
+    position: 0,
   });
 }

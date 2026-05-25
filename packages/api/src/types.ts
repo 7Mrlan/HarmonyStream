@@ -63,6 +63,21 @@ export interface NextResponse {
 
 /* ========== GET /api/taste ========== */
 
+/* ========== POST /api/playback/next | POST /api/playback/previous ========== */
+
+export type PlaybackMoveResponse =
+  | {
+      ok: true;
+      track: Track;
+      queue: Track[];
+    }
+  | {
+      ok: false;
+      reason: string;
+      track: Track | null;
+      queue: Track[];
+    };
+
 export interface TasteResponse {
   genres: string[];
   moods: string[];

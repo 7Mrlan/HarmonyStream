@@ -15,6 +15,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 export interface TtsPlayerState {
   /* 是否正在播放 TTS。 */
   playing: boolean;
+  /* 是否已经加载过可继续播放的 TTS。 */
+  ready: boolean;
   /* 当前已加载的 url；未播放过时为 null。 */
   currentUrl: string | null;
 }
@@ -22,6 +24,12 @@ export interface TtsPlayerState {
 export interface TtsPlayerActions {
   /* 播放指定 url；若已是同一 url 则从头重播。 */
   play: (url: string) => void;
+  /* 从当前位置继续播放。 */
+  resume: () => void;
+  /* 暂停但保留当前位置。 */
+  pause: () => void;
+  /* 播放 / 暂停切换，暂停后再次点击会从当前位置继续。 */
+  toggle: () => void;
   /* 停止并回到 0 秒。 */
   stop: () => void;
 }
@@ -44,6 +52,7 @@ export function useTtsPlayer(): TtsPlayerState & TtsPlayerActions {
   );
   const player = useAudioPlayer(source);
   const status = useAudioPlayerStatus(player);
+  const ready = Boolean(currentUrl) && status.isLoaded && !status.didJustFinish;
 
   /*
    * url 或 replayNonce 变化时，从头开始播。
@@ -68,6 +77,24 @@ export function useTtsPlayer(): TtsPlayerState & TtsPlayerActions {
     });
   }, []);
 
+  const resume = useCallback(() => {
+    if (!currentUrl || status.didJustFinish) return;
+    player.play();
+  }, [currentUrl, player, status.didJustFinish]);
+
+  const pause = useCallback(() => {
+    player.pause();
+  }, [player]);
+
+  const toggle = useCallback(() => {
+    if (!currentUrl || status.didJustFinish) return;
+    if (status.playing) {
+      player.pause();
+      return;
+    }
+    player.play();
+  }, [currentUrl, player, status.didJustFinish, status.playing]);
+
   const stop = useCallback(() => {
     player.pause();
     void player.seekTo(0);
@@ -75,8 +102,12 @@ export function useTtsPlayer(): TtsPlayerState & TtsPlayerActions {
 
   return {
     playing: status.playing && !status.didJustFinish,
+    ready,
     currentUrl,
     play,
+    resume,
+    pause,
+    toggle,
     stop,
   };
 }

@@ -32,6 +32,7 @@
 - [x] Phase G.1：LX-compatible 服务端 Bridge
 - [x] Phase G.2-pre：评论区驱动真实音乐闭环
 - [x] Phase G.2-default：默认真实音乐源
+- [x] Phase H：电台播放控制语义重整
 - [ ] Phase F：后台播放、锁屏控制、APK release、长时运行等产品化任务
 
 ---
@@ -48,6 +49,8 @@
 | 情绪类点歌误判 | 完成 | “想听伤感的歌曲”不再被当成《伤感》精确搜歌，改为情绪 / 类型推荐路径。 |
 | explame AI 审查复核 | 完成 | 采纳预加载中断、服务端并发、标题匹配、ducking 高频调用、TTS cache 淘汰等真实问题；忽略不符合个人开源目标的鉴权/CORS建议。 |
 | radioState God Object 拆分 | 完成 | 新增 `server/src/radio/intentParser.ts`、`server/src/radio/djCopy.ts`，`radioState.ts` 保留状态与编排，对外 API 不变。 |
+| 播放控制回归修复 | 完成 | 恢复播放按钮可用、TTS 暂停/续播和 VOICE OFF 过期 TTS 防护；后续 Phase H 重新梳理完整控制语义。 |
+| Phase H | 完成 | 主播放按钮统一为电台总控，VOICE 只管主播自动播报，上一首 / 下一首走服务端 queue currentIndex。 |
 
 ---
 
@@ -60,16 +63,22 @@
 
 ---
 
-## 当前任务 · 文档生命周期规则修正
+## 当前任务 · Phase H（电台播放控制语义重整）
 
-- [x] 规则：在 `AGENTS.md` 改为“阶段验收通过后归档 Spec”，不再以行数作为主要压缩触发器。
-- [x] 教训：在 `tasks/lessons.md` 记录本次纠正，明确行数只做巡检信号。
-- [x] 同步：更新 `tasks/spec.md` 与当前看板规则，保持项目真源一致。
-- [x] 检查：确认 `tasks/spec.md` / `tasks/todo.md` 当前行数并在最终回复报告。
+- [x] 模型复核：确认三层模型更符合用户直觉：电台总控、歌曲队列、主播语音。
+- [x] 现状分析：写入 `tasks/spec.md` §13.2，标注文件路径和函数名。
+- [x] 补充现状：记录 `tts.ready` 在播完后变 false 导致主按钮静默切回歌曲状态。
+- [x] 功能点方案：写入 `tasks/spec.md` §13.3，覆盖电台编排、主控、主播语音、队列切歌和服务端切歌 API 选型。
+- [x] 边界补充：明确 v1 previous 只在当前 queue 内后退，next 耗尽返回 `queue exhausted`，不自动补歌。
+- [x] 风险与执行步骤：写入 `tasks/spec.md` §13.4-13.5。
+- [x] HARD-GATE：用户确认完整 Phase H Spec 后开始编码。
+- [x] 共享契约：新增 `PlaybackMoveResponse` 与 `playNext` / `playPrevious` 客户端方法。
+- [x] 服务端：新增 `currentIndex` 与 `/api/playback/next|previous`，失败响应保留当前 track。
+- [x] 移动端：新增 `useStationController`，页面按钮统一接入电台总控。
+- [x] 验证：`pnpm typecheck`、`pnpm lint`、HTTP 点歌与播放移动烟测通过。
 
 ### Review
 
-- 完成：`AGENTS.md` 已改为阶段完成归档规则：验收通过后归档完整 Spec，`spec.md` 保留跨阶段决策、当前阶段和摘要。
-- 完成：`tasks/lessons.md` 已把本次纠正沉淀为“阶段完成后归档，行数只做巡检”。
-- 完成：`tasks/spec.md` / `tasks/todo.md` 已同步新口径。
-- 验证：`tasks/spec.md` 当前 227 行，`tasks/todo.md` 当前 55 行。
+- `pnpm typecheck` 通过；`pnpm lint` 通过。
+- HTTP 烟测：空队列 `next/previous` 分别返回 `queue exhausted` / `queue start` 且 track 为 null。
+- HTTP 烟测：点歌“我想听周杰伦的晴天”后 `/api/now.state=playing`，失败移动响应保留当前《晴天》track。
