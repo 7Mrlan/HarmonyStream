@@ -15,7 +15,6 @@
 
 import { useAudioPlayer, useAudioPlayerStatus, type AudioPlayer, type AudioSource } from 'expo-audio';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Platform } from 'react-native';
 
 /* 曲目元信息（v1 mock，v3 起接入电台 / 推荐 API） */
 export interface RadioTrack {
@@ -57,7 +56,7 @@ export interface RadioPlayerActions {
   stop: () => void;
   /* 跳到指定秒数 */
   seek: (seconds: number) => void;
-  /* 切换到下一首（v1 仅 mock：在 DEFAULT_PLAYLIST 中循环） */
+  /* 切换到下一首。 */
   next: () => void;
   /* 切换到上一首 */
   prev: () => void;
@@ -75,56 +74,25 @@ export interface RadioPlayerLockScreenBridge {
   lockScreenPlayer: RadioLockScreenPlayer;
 }
 
-/*
- * 默认电台播放列表（v1 mock，使用 SoundHelix 的开放测试音频）
- * SoundHelix 是程序生成音乐的开放试听站，允许免费用于演示与测试。
- */
-const DEFAULT_PLAYLIST: RadioTrack[] = [
-  {
-    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
-    title: 'Late Night Drive',
-    artist: 'SoundHelix',
-    durationFallback: 372,
-  },
-  {
-    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
-    title: 'Synthwave Pulse',
-    artist: 'SoundHelix',
-    durationFallback: 425,
-  },
-  {
-    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3',
-    title: 'Pixel Reverie',
-    artist: 'SoundHelix',
-    durationFallback: 288,
-  },
-];
-
-/*
- * Web fallback 历史上返回毫秒，原生侧返回秒。
- * UI 层统一使用秒，seek 时再转换成播放器当前平台需要的单位。
- */
-const AUDIO_TIME_SCALE = Platform.OS === 'web' ? 1000 : 1;
-
 /* 把播放器状态时间统一转换成 UI 使用的秒。 */
 function fromPlayerTime(value: number | undefined): number {
   if (value === undefined || !Number.isFinite(value) || value < 0) return 0;
-  return value / AUDIO_TIME_SCALE;
+  return value;
 }
 
 /* 把 UI 传入的秒转换成播放器 seekTo 需要的单位。 */
 function toPlayerTime(seconds: number): number {
   if (!Number.isFinite(seconds) || seconds < 0) return 0;
-  return seconds * AUDIO_TIME_SCALE;
+  return seconds;
 }
 
 /*
  * Hook：useRadioPlayer
- * @param playlist  自定义播放列表，默认使用 DEFAULT_PLAYLIST
+ * @param playlist  服务端下发的真实播放列表；为空时只展示占位，不播放 demo 曲。
  * @returns 播放状态 + 控制动作
  */
 export function useRadioPlayer(
-  playlist: RadioTrack[] = DEFAULT_PLAYLIST,
+  playlist: RadioTrack[] = [],
 ): RadioPlayerState & RadioPlayerActions & RadioPlayerLockScreenBridge {
   /* 当前播放索引 */
   const [trackIndex, setTrackIndex] = useState(0);
@@ -134,8 +102,10 @@ export function useRadioPlayer(
    *   - 用户在暂停状态点上一首 / 下一首：只换曲，不擅自播放
    */
   const shouldAutoPlayRef = useRef(false);
+  /* 最近一次自动播放过的 URL，避免重渲染重复触发 play。 */
+  const lastAutoPlayedUrlRef = useRef<string | null>(null);
 
-  /* 当前曲目（兜底：playlist 为空时给一个占位 url） */
+  /* 当前曲目（playlist 为空时只给占位信息，不指向任何音频 URL）。 */
   const track = useMemo<RadioTrack>(
     () => playlist[trackIndex] ?? playlist[0] ?? { url: '', title: '—' },
     [playlist, trackIndex],
@@ -156,6 +126,20 @@ export function useRadioPlayer(
   const ended =
     status.didJustFinish ||
     (!status.playing && durationSeconds > 0 && positionSeconds >= Math.max(durationSeconds - 0.25, 0));
+
+  useEffect(() => {
+    setTrackIndex(0);
+  }, [playlist]);
+
+  useEffect(() => {
+    if (!track.url) {
+      lastAutoPlayedUrlRef.current = null;
+      return;
+    }
+    if (lastAutoPlayedUrlRef.current === track.url) return;
+    lastAutoPlayedUrlRef.current = track.url;
+    player.play();
+  }, [player, track.url]);
 
   useEffect(() => {
     if (!shouldAutoPlayRef.current) return;
@@ -202,18 +186,20 @@ export function useRadioPlayer(
   );
 
   const next = useCallback(() => {
+    if (playlist.length === 0) return;
     shouldAutoPlayRef.current = status.playing;
     setTrackIndex((i) => (i + 1) % playlist.length);
   }, [playlist.length, status.playing]);
 
   const prev = useCallback(() => {
+    if (playlist.length === 0) return;
     shouldAutoPlayRef.current = status.playing;
     setTrackIndex((i) => (i - 1 + playlist.length) % playlist.length);
   }, [playlist.length, status.playing]);
 
   /*
    * 设置播放音量。
-   * Phase E：TTS 期间把音乐 ducking 到 0.3，结束后恢复 1.0；
+   * TTS talk-over 期间由页面层把音乐 ducking 到较低音量，结束后恢复 1.0；
    * expo-audio 的 player.volume 在 web/native 都生效。
    */
   const setVolume = useCallback(

@@ -75,6 +75,8 @@ export interface MusicSearchInput {
 export interface MusicProvider {
   /* provider 自描述。 */
   manifest: MusicProviderManifest;
+  /* 可选启动预热：加载脚本、初始化连接等，不应做真实搜索或下载音频。 */
+  warmup?: () => Promise<void>;
   /* 搜索并返回可播放曲目；返回值必须已经过滤无 url 结果。 */
   searchPlayableTracks: (input: MusicSearchInput) => Promise<Track[]>;
   /* 运行时是否启用，registry 用它过滤未配置的 provider。 */
@@ -82,7 +84,7 @@ export interface MusicProvider {
 }
 
 export interface ResolvedMusicPlan {
-  /* 最终可播放队列，至少有 fallback 曲目。 */
+  /* 最终可播放队列；用户点歌禁用 fallback 时可能为空。 */
   tracks: Track[];
   /* 是否使用了 fallback catalog。 */
   usedFallback: boolean;

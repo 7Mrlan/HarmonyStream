@@ -11,7 +11,7 @@
  *   - shouldRouteThroughEarpiece=false：避免误走听筒（电台需要外放）
  *   - allowsRecording=false：当前没有录音链路，不申请录音会话
  *
- * TTS ducking 由应用内 radio.setVolume(0.3) 完成，不依赖系统级 duckOthers。
+ * TTS ducking 由应用内 radio.setVolume 完成，不依赖系统级 duckOthers。
  * 失败完全静默：会话配置失败不阻塞 UI；设备不支持时让默认行为兜底。
  */
 

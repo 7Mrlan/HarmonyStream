@@ -11,11 +11,18 @@ import { env } from '../env';
 import { createFallbackProvider } from './fallbackCatalog';
 import { createExternalResolverProvider } from './providers/externalResolverProvider';
 import { createLocalProvider } from './providers/localProvider';
+import { createLxBridgeProvider } from './providers/lxBridgeProvider';
 import { createNcmProvider } from './providers/ncmProvider';
+import { createLxCandidateSearcher } from './lxBridge/candidateSearch';
+import { createLxSourceRuntime } from './lxBridge/sourceRuntime';
 import type { MusicProvider } from './types';
 
 /* 受支持的 chain 关键字。 */
-const SUPPORTED_KEYS = new Set(['local', 'external', 'ncm', 'fallback']);
+const SUPPORTED_KEYS = new Set(['local', 'external', 'lx', 'ncm', 'fallback']);
+/* 系统默认 LX 源：使用已完成真实闭环验证的 huibq 源在线导入链接。 */
+const DEFAULT_LX_SOURCE_SCRIPT_URL =
+  'https://raw.githubusercontent.com/pdone/lx-music-source/main/huibq/latest.js';
+const DEFAULT_LX_QUALITY_PREFERENCE = ['320k', '128k'];
 
 let cachedChain: MusicProvider[] | null = null;
 
@@ -32,6 +39,20 @@ export function getProviderChain(): MusicProvider[] {
 /* 按 manifest.id 查找 provider，路由层 / 缓存层会用到。 */
 export function findProviderById(id: string): MusicProvider | null {
   return getProviderChain().find((provider) => provider.manifest.id === id) ?? null;
+}
+
+/*
+ * 启动后预热 provider。
+ * 只调用 provider 的显式 warmup，不做搜索、不解析音频 URL，避免启动时触碰用户点歌语义。
+ */
+export function warmupProviderChain(): void {
+  for (const provider of getProviderChain()) {
+    if (!provider.warmup) continue;
+    void provider.warmup().catch((error) => {
+      const message = error instanceof Error ? error.message : '未知错误';
+      console.warn(`[music] provider warmup failed: ${provider.manifest.id}: ${message}`);
+    });
+  }
 }
 
 /* 测试与热重载场景使用，业务路径不会调用。 */
@@ -74,6 +95,7 @@ function createCandidates(): Map<string, MusicProvider> {
   const map = new Map<string, MusicProvider>();
   map.set('local', createLocalProvider(env.MUSIC_LIBRARY_DIR ?? '', env.MEDIA_BASE_URL ?? ''));
   map.set('external', createExternalResolverProvider(env.EXTERNAL_MUSIC_RESOLVER_URL ?? ''));
+  map.set('lx', createConfiguredLxProvider());
   map.set('ncm', createNcmProvider(env.MUSIC_API_BASE_URL ?? ''));
   map.set('fallback', createFallbackProvider());
   return map;
@@ -95,8 +117,56 @@ function parseChainConfig(value: string | undefined): string[] | null {
  * 否则按 owned → external → fallback 的稳定顺序。
  */
 function defaultChain(): string[] {
-  const chain: string[] = ['local', 'external'];
+  const chain: string[] = ['local', 'external', 'lx'];
   if (env.MUSIC_PROVIDER === 'ncm') chain.push('ncm');
   chain.push('fallback');
   return chain;
+}
+
+/*
+ * 创建 LX Bridge provider。
+ * 默认使用已验证的 huibq 源 + Kuwo 候选搜索；用户显式配置 URL / 文件 / resolver 时覆盖默认值。
+ */
+function createConfiguredLxProvider(): MusicProvider {
+  const scriptUrl =
+    env.LX_SOURCE_SCRIPT_URL ??
+    (env.LX_SOURCE_SCRIPT_FILE ? undefined : DEFAULT_LX_SOURCE_SCRIPT_URL);
+  const scriptFile = env.LX_SOURCE_SCRIPT_FILE;
+  const hasScript = Boolean(scriptUrl || scriptFile);
+  const hasCandidateSource = Boolean(
+    env.LX_METADATA_RESOLVER_URL ||
+      env.LX_METADATA_FIXTURE_FILE ||
+      env.LX_ENABLE_KUWO_SEARCH,
+  );
+
+  return createLxBridgeProvider({
+    runtime: createLxSourceRuntime({
+      scriptUrl,
+      scriptFile,
+      sourceId: env.LX_SOURCE_ID,
+      sourceName: env.LX_SOURCE_NAME,
+      timeoutMs: env.LX_BRIDGE_TIMEOUT_MS,
+      requestTimeoutMs: env.LX_BRIDGE_REQUEST_TIMEOUT_MS,
+    }),
+    candidateSearcher: createLxCandidateSearcher({
+      resolverUrl: env.LX_METADATA_RESOLVER_URL,
+      fixtureFile: env.LX_METADATA_FIXTURE_FILE,
+      enableKuwoSearch: env.LX_ENABLE_KUWO_SEARCH,
+      timeoutMs: env.LX_BRIDGE_TIMEOUT_MS,
+    }),
+    isEnabled: () => hasScript && hasCandidateSource,
+    qualityPreference: parseQualityPreference(env.LX_QUALITY_PREFERENCE),
+    urlTtlMs: 90 * 1000,
+  });
+}
+
+/* 解析 LX 音质优先级，去重并兜底到当前默认源可用的高音质顺序。 */
+function parseQualityPreference(value: string | undefined): string[] {
+  const parsed = (value ?? '')
+    .split(',')
+    .map((quality) => quality.trim())
+    .filter((quality) => quality.length > 0);
+
+  const unique = [...new Set(parsed)];
+  return unique.length > 0 ? unique : DEFAULT_LX_QUALITY_PREFERENCE;
 }

@@ -27,6 +27,7 @@ export interface Track {
   artist?: string;
   artwork?: string; // https url，512×512+
   duration?: number; // 秒
+  quality?: string; // 实际解析到的音质，例如 320k / flac
   source?: TrackSourceInfo;
   expiresAt?: string;
 }

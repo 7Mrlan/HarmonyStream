@@ -65,12 +65,12 @@ interface SparkSeed {
   opacity: number;
 }
 
-const TRACK_HEIGHT = 60;
-const TRACK_TOP = 4;
-const TRACK_PADDING = 4;
-const OUTER_HEIGHT = 68;
-const SHIP_WIDTH = 52;
-const SHIP_HEIGHT = 28;
+const TRACK_HEIGHT = 14;
+const TRACK_TOP = 2;
+const TRACK_PADDING = 2;
+const OUTER_HEIGHT = 22;
+const SHIP_WIDTH = 28;
+const SHIP_HEIGHT = 14;
 const FLAME_CENTER_Y = SHIP_HEIGHT / 2 - 2;
 const CHARGE_COUNT = 40;
 const SPARK_COUNT = 8;
@@ -105,7 +105,7 @@ function createChargeSeeds(count: number): ChargeSeed[] {
     seed = nextSeed(seed);
     const offset = (seed % 1000) / 1000;
     seed = nextSeed(seed);
-    const lane = 7 + ((seed % 260) / 10);
+    const lane = 3 + ((seed % 60) / 10);
     seed = nextSeed(seed);
     const speed = 0.7 + ((seed % 120) / 100);
     seed = nextSeed(seed);
@@ -126,13 +126,13 @@ function createSparkSeeds(count: number): SparkSeed[] {
     seed = nextSeed(seed);
     const distance = 10 + (seed % 50);
     seed = nextSeed(seed);
-    const amplitude = 2 + (seed % 7);
+    const amplitude = 1 + (seed % 2);
     seed = nextSeed(seed);
     const offset = (seed % 1000) / 1000;
     seed = nextSeed(seed);
-    const lane = -6 + (seed % 12);
+    const lane = -2 + (seed % 4);
     seed = nextSeed(seed);
-    const size = 4 + (seed % 4);
+    const size = 2;
     seed = nextSeed(seed);
     const color = palette[seed % palette.length] ?? '#00FFFF';
     seed = nextSeed(seed);
@@ -199,13 +199,13 @@ function ChargeParticle({
       style={[
         {
           position: 'absolute',
-          width: 4,
-          height: 4,
+          width: 2,
+          height: 2,
           borderRadius: 1,
           backgroundColor: '#00FFFF',
           shadowColor: '#00FFFF',
           shadowOpacity: 0.85,
-          shadowRadius: 8,
+          shadowRadius: 5,
         },
         animatedStyle,
       ]}
@@ -256,7 +256,7 @@ function DragSpark({
           backgroundColor: seed.color,
           shadowColor: seed.color,
           shadowOpacity: 0.7,
-          shadowRadius: 8,
+          shadowRadius: 5,
         },
         animatedStyle,
       ]}
@@ -457,7 +457,7 @@ export function PlaybackProgressBar({
 
   const flameOuterStyle = useAnimatedStyle(() => {
     const activeLevel = Math.max(playingLevel.value, dragLevel.value);
-    const width = 10 + flamePulse.value * 15;
+    const width = 5 + flamePulse.value * 6;
     return {
       width,
       opacity: activeLevel * (1 - flamePulse.value * 0.5),
@@ -479,9 +479,9 @@ export function PlaybackProgressBar({
               left: 0,
               right: 0,
               height: TRACK_HEIGHT,
-              borderRadius: 4,
+              borderRadius: 3,
               overflow: 'hidden',
-              borderWidth: 2,
+              borderWidth: 1,
               borderColor: 'rgba(0,255,255,0.2)',
               backgroundColor: 'rgba(255,255,255,0.05)',
             }}
@@ -561,13 +561,13 @@ export function PlaybackProgressBar({
                 {
                   position: 'absolute',
                   left: 0,
-                  top: FLAME_CENTER_Y - 5,
-                  height: 10,
+                  top: FLAME_CENTER_Y - 2,
+                  height: 4,
                   borderRadius: 1,
                   backgroundColor: '#A020F0',
                   shadowColor: '#A020F0',
                   shadowOpacity: 0.8,
-                  shadowRadius: 10,
+                  shadowRadius: 6,
                 },
                 flameOuterStyle,
               ]}
@@ -575,10 +575,10 @@ export function PlaybackProgressBar({
             <View
               style={{
                 position: 'absolute',
-                left: -14,
-                top: FLAME_CENTER_Y - 3,
-                width: 10,
-                height: 6,
+                  left: -7,
+                  top: FLAME_CENTER_Y - 1,
+                  width: 5,
+                  height: 3,
                 backgroundColor: '#ffffff',
                 borderRadius: 1,
               }}

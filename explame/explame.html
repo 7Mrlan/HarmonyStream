@@ -1,194 +1,21 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pixel AI Radio Tuning</title>
-    <style>
-        :root {
-            --bg-color: #000000;
-            --primary-color: #00ff88;
-            --secondary-color: #1f1f1f;
-            --accent-color: #ff3355;
-            --text-color: #e8e8e8;
-            --pixel-size: 2px;
-        }
+明白了！以下是简洁版音源插件推荐清单，仅包含你自用软件可集成的几个核心方案，方便直接交给 AI 或用于开发参考：
 
-        body, html {
-            margin: 0;
-            padding: 0;
-            width: 100%;
-            height: 100%;
-            background-color: var(--bg-color);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
-            font-family: 'Courier New', Courier, monospace;
-        }
+🔊 推荐音源插件方案（可用于自研音乐软件）
 
-        .container {
-            position: relative;
-            width: 280px;
-            height: 88px;
-            background: var(--bg-color);
-            border: 2px solid var(--secondary-color);
-            image-rendering: pixelated;
-        }
+YouTube + yt-dlp  
+   说明：通过 yt-dlp 从 YouTube 搜索并提取音频流。  
+   优点：曲库最全、音质高（支持 320kbps MP3 / Opus）、社区维护活跃。  
+   适用：主音源首选。
 
-        /* 像素风背景网格 */
-        .grid-bg {
-            position: absolute;
-            inset: 0;
-            background-image: 
-                linear-gradient(var(--secondary-color) 1px, transparent 1px),
-                linear-gradient(90deg, var(--secondary-color) 1px, transparent 1px);
-            background-size: 8px 8px;
-            opacity: 0.3;
-        }
+Piped API  
+   说明：调用去中心化 YouTube 前端（如 pipedapi.kavin.rocks）获取音频，无需直连 Google。  
+   优点：规避地域限制、保护隐私、返回结构化 JSON。  
+   适用：YouTube 的合规替代方案。
 
-        /* 信号扫描线 */
-        @keyframes scanline {
-            0% { transform: translateX(-100%); }
-            100% { transform: translateX(300%); }
-        }
+SoundCloud  
+   说明：接入 SoundCloud 公开 API 获取独立音乐、Demo、混音等资源。  
+   优点：覆盖主流平台缺失的小众内容。  
+   适用：补充音源。
 
-        /* 频率指针移动 */
-        @keyframes needleMove {
-            0%, 100% { transform: translateX(20px); }
-            50% { transform: translateX(240px); }
-        }
 
-        /* 信号波跳动 */
-        @keyframes waveJump {
-            0%, 100% { transform: scaleY(0.2); }
-            50% { transform: scaleY(1.2); }
-        }
-
-        /* 故障闪烁 */
-        @keyframes glitch {
-            0% { opacity: 1; }
-            95% { opacity: 1; }
-            96% { opacity: 0; }
-            97% { opacity: 1; }
-            99% { opacity: 0.2; }
-            100% { opacity: 1; }
-        }
-
-        /* 文字呼吸 */
-        @keyframes blink {
-            0%, 49% { opacity: 1; }
-            50%, 100% { opacity: 0; }
-        }
-
-        .label {
-            position: absolute;
-            bottom: 6px;
-            right: 10px;
-            color: var(--text-color);
-            font-size: 10px;
-            letter-spacing: 1px;
-            text-transform: uppercase;
-        }
-
-        .cursor {
-            display: inline-block;
-            width: 6px;
-            height: 10px;
-            background: var(--primary-color);
-            animation: blink 0.6s infinite;
-            vertical-align: middle;
-            margin-left: 4px;
-        }
-    </style>
-</head>
-<body>
-
-    <!-- 主体：像素调频模块 -->
-    <div class="container">
-        <div class="grid-bg"></div>
-        
-        <svg width="280" height="88" viewBox="0 0 280 88" xmlns="http://www.w3.org/2000/svg" style="animation: glitch 3s infinite;">
-            <!-- 刻度线 -->
-            <g stroke="var(--secondary-color)" stroke-width="2">
-                <line x1="20" y1="20" x2="260" y2="20" />
-                <line x1="20" y1="20" x2="20" y2="30" />
-                <line x1="80" y1="20" x2="80" y2="26" />
-                <line x1="140" y1="20" x2="140" y2="30" />
-                <line x1="200" y1="20" x2="200" y2="26" />
-                <line x1="260" y1="20" x2="260" y2="30" />
-            </g>
-
-            <!-- 信号频率波 (像素块形态) -->
-            <g transform="translate(40, 45)">
-                <rect x="0" y="0" width="4" height="20" fill="var(--primary-color)">
-                    <animate attributeName="height" values="4;18;4" dur="0.6s" repeatCount="indefinite" />
-                </rect>
-                <rect x="8" y="5" width="4" height="10" fill="var(--primary-color)">
-                    <animate attributeName="height" values="10;22;10" dur="0.7s" repeatCount="indefinite" />
-                </rect>
-                <rect x="16" y="2" width="4" height="15" fill="var(--primary-color)">
-                    <animate attributeName="height" values="15;8;15" dur="0.5s" repeatCount="indefinite" />
-                </rect>
-                <rect x="24" y="8" width="4" height="12" fill="var(--primary-color)">
-                    <animate attributeName="height" values="6;20;6" dur="0.8s" repeatCount="indefinite" />
-                </rect>
-                <rect x="32" y="4" width="4" height="18" fill="var(--primary-color)">
-                    <animate attributeName="height" values="18;4;18" dur="0.4s" repeatCount="indefinite" />
-                </rect>
-                <!-- 静态底线 -->
-                <line x1="-20" y1="25" x2="220" y2="25" stroke="var(--secondary-color)" stroke-width="1" />
-            </g>
-
-            <!-- 调频扫描指针 -->
-            <g id="needle">
-                <rect width="2" height="16" fill="var(--accent-color)" x="0" y="15" />
-                <rect width="6" height="6" fill="var(--accent-color)" x="-2" y="12" />
-                <animateTransform attributeName="transform" type="translate" from="20 0" to="260 0" dur="1.8s" repeatCount="indefinite" />
-            </g>
-
-            <!-- 锁定信号框 -->
-            <g transform="translate(180, 42)">
-                <path d="M0 0 H8 V4 H0 Z M12 0 H20 V4 H12 Z M0 12 H8 V16 H0 Z M12 12 H20 V16 H12 Z" fill="var(--secondary-color)">
-                    <animate attributeName="fill" values="#1f1f1f;#00ff88;#1f1f1f" dur="1.2s" repeatCount="indefinite" />
-                </path>
-                <rect x="8" y="6" width="4" height="4" fill="var(--accent-color)">
-                    <animate attributeName="opacity" values="1;0;1" dur="0.4s" repeatCount="indefinite" />
-                </rect>
-            </g>
-
-            <!-- 顶部状态文字 -->
-            <text x="20" y="12" fill="var(--primary-color)" font-size="8px" font-weight="bold" letter-spacing="1">FM 99.7 AI_SIGNAL</text>
-        </svg>
-
-        <div class="label">正在调频<span class="cursor"></span></div>
-    </div>
-
-    <!-- 变体说明容器 (仅用于展示) -->
-    <div style="margin-top: 40px; display: flex; gap: 20px;">
-        <!-- 变体A：老式收音机调频感 -->
-        <div style="width: 120px; height: 40px; border: 1px solid #1f1f1f; position: relative; overflow: hidden; background: #000;">
-            <div style="position: absolute; top: 10px; left: 0; width: 100%; height: 1px; background: #1f1f1f;"></div>
-            <div style="position: absolute; top: 5px; left: 10%; width: 2px; height: 10px; background: #ff3355; animation: needleMove 2s infinite linear;"></div>
-            <div style="position: absolute; bottom: 5px; left: 5px; font-size: 8px; color: #00ff88; font-family: monospace;">TUNING...</div>
-        </div>
-
-        <!-- 变体B：赛博终端信号锁定 -->
-        <div style="width: 120px; height: 40px; border: 1px solid #1f1f1f; position: relative; background: #000; display: flex; align-items: center; justify-content: center; gap: 3px;">
-            <div style="width: 4px; height: 10px; background: #00ff88; animation: waveJump 0.3s infinite;"></div>
-            <div style="width: 4px; height: 16px; background: #00ff88; animation: waveJump 0.4s infinite;"></div>
-            <div style="width: 4px; height: 8px; background: #00ff88; animation: waveJump 0.5s infinite;"></div>
-            <div style="position: absolute; top: 2px; right: 2px; font-size: 6px; color: #e8e8e8;">SYNC_LOCK</div>
-        </div>
-    </div>
-
-    <script>
-        // 保持单次循环逻辑，由于是纯CSS/SVG动画，此处仅用于确保首帧渲染同步
-        window.addEventListener('DOMContentLoaded', () => {
-            console.log("Radio Tuning Module Active...");
-        });
-    </script>
-</body>
-
-</html>
+✅ 建议架构：以 YouTube/Piped 为主，其余作为 fallback 插件，按优先级自动切换。

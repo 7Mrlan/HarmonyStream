@@ -15,6 +15,7 @@ import { registerStreamRoutes } from './routes/streamRoutes';
 import { shutdownStreamHub } from './realtime/streamHub';
 import { shutdownAudioStore } from './tts/audioStore';
 import { shutdownMusicResolver } from './music/musicResolver';
+import { warmupProviderChain } from './music/providerRegistry';
 
 /* 创建 Fastify 实例，pino 日志开发期友好打印 */
 const app = Fastify({
@@ -77,6 +78,7 @@ async function start(): Promise<void> {
   try {
     await app.listen({ port: env.PORT, host: '0.0.0.0' });
     app.log.info(`claudio-server listening on http://0.0.0.0:${env.PORT}`);
+    warmupProviderChain();
   } catch (err) {
     app.log.error(err);
     process.exit(1);

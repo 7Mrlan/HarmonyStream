@@ -26,6 +26,8 @@ export interface ResolveTracksForChatInput {
   preferredTitles?: string[];
   /* 最大队列长度。 */
   limit?: number;
+  /* 是否允许把静态 fallback 曲目作为播放结果。用户点歌默认不允许。 */
+  allowFallback?: boolean;
 }
 
 /* provider 解析结果共享缓存。所有 chain 命中都走它。 */
@@ -50,11 +52,17 @@ export async function resolveTracksForChat({
   userText,
   preferredTitles,
   limit = 3,
+  allowFallback = false,
 }: ResolveTracksForChatInput): Promise<ResolvedMusicPlan> {
   const chain = getProviderChain();
   const reasons: string[] = [];
 
   for (const provider of chain) {
+    if (provider.manifest.tier === 'fallback' && !allowFallback) {
+      reasons.push('fallback 已禁用，避免把测试曲当作真实点歌结果');
+      continue;
+    }
+
     try {
       const cached = readCache(provider, userText, preferredTitles, limit);
       if (cached) {
@@ -90,7 +98,16 @@ export async function resolveTracksForChat({
     }
   }
 
-  /* chain 全部失败时仍要兜底。理论上 fallback provider 永远会成功；这里再加一道保险。 */
+  if (!allowFallback) {
+    return {
+      tracks: [],
+      usedFallback: true,
+      providerId: 'none',
+      reason: reasons.length > 0 ? reasons.join('；') : 'provider chain 没有返回真实可播放结果',
+    };
+  }
+
+  /* 仅在调用方显式允许时，才使用静态 demo 曲兜底。 */
   const safe = FALLBACK_TRACKS.slice(0, Math.max(1, limit)).map(cloneTrack);
   return {
     tracks: safe,

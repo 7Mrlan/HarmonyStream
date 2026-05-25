@@ -33,6 +33,7 @@ export interface ChatInputProps {
   onMicPress?: () => void;
   value?: string;
   onChangeText?: (text: string) => void;
+  sending?: boolean;
 }
 
 /* Hook：终端式光标 1Hz 闪烁 */
@@ -216,6 +217,7 @@ export function ChatInput({
   onMicPress,
   value,
   onChangeText,
+  sending = false,
 }: ChatInputProps) {
   /* 内部维护一份 state，便于在受控/非受控两种模式下都工作 */
   const [internal, setInternal] = useState('');
@@ -233,6 +235,7 @@ export function ChatInput({
   /* 发送时校验空字符串，发送后清空输入 */
   function handleSend() {
     const trimmed = text.trim();
+    if (sending) return;
     if (!trimmed) return;
     onSend?.(trimmed);
     setInternal('');
@@ -297,7 +300,7 @@ export function ChatInput({
       {/* 发送按钮：有内容时点亮 */}
       <Pressable
         onPress={handleSend}
-        disabled={!text.trim()}
+        disabled={sending || !text.trim()}
         className={`border px-3 py-2 active:bg-line ${text.trim() ? 'border-text bg-text' : 'border-line bg-panel'}`}
       >
         <Text

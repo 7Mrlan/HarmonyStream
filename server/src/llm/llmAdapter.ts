@@ -7,7 +7,7 @@
 
 import type { ChatResponse, NowResponse, Track } from '@claudio/api';
 import { env } from '../env';
-import { buildDjPrompt } from './prompt';
+import { buildDjPrompt, buildMusicIntentPrompt } from './prompt';
 
 interface ProviderConfig {
   id: string;
@@ -29,10 +29,44 @@ export interface GenerateDjResponseInput {
   candidateTracks: Track[];
 }
 
+export interface MusicIntent {
+  /* LLM 认为应优先检索或播放的歌名。 */
+  preferredTitles: string[];
+  /* 给音乐 provider 使用的短搜索词。 */
+  searchQuery: string;
+  /* 氛围标签，仅用于 reason / 排障，不进入公开契约。 */
+  mood?: string;
+  /* 选曲策略短说明，仅内部使用。 */
+  note?: string;
+}
+
+export interface GenerateMusicIntentInput {
+  userText: string;
+  modelId: string;
+  modelDisplayName: string;
+  playbackState: NowResponse['state'];
+  currentTrack: Track | null;
+}
+
 export type GenerateDjResponseResult =
   | {
       ok: true;
       response: ChatResponse;
+      providerId: string;
+      model: string;
+      elapsedMs: number;
+    }
+  | {
+      ok: false;
+      reason: string;
+      providerId: string;
+      elapsedMs: number;
+    };
+
+export type GenerateMusicIntentResult =
+  | {
+      ok: true;
+      intent: MusicIntent;
       providerId: string;
       model: string;
       elapsedMs: number;
@@ -50,6 +84,78 @@ interface OpenAiChatCompletionResponse {
       content?: string;
     };
   }>;
+}
+
+/*
+ * 生成音乐检索意图。
+ * 这一步发生在真实音乐解析之前，只让 LLM 给出短搜索线索，失败时调用方回退用户原文。
+ */
+export async function generateMusicIntent(
+  input: GenerateMusicIntentInput,
+): Promise<GenerateMusicIntentResult> {
+  const startedAt = Date.now();
+  const provider = getProviderConfig(input.modelId, input.modelDisplayName);
+
+  if (!provider.apiKey) {
+    return buildIntentFailure(provider, startedAt, 'provider key 未配置');
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), env.LLM_TIMEOUT_MS);
+
+  try {
+    const requestBody: Record<string, unknown> = {
+      model: provider.model,
+      messages: buildMusicIntentPrompt(input),
+      temperature: 0.35,
+      max_tokens: 220,
+    };
+
+    if (provider.jsonMode) {
+      requestBody.response_format = { type: 'json_object' };
+    }
+
+    if (provider.thinkingType) {
+      requestBody.thinking = { type: provider.thinkingType };
+    }
+
+    const response = await fetch(buildChatCompletionsUrl(provider.baseUrl), {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${provider.apiKey}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      return buildIntentFailure(provider, startedAt, `provider HTTP ${response.status}`);
+    }
+
+    const content = readCompletionContent((await response.json()) as unknown);
+    if (!content) {
+      return buildIntentFailure(provider, startedAt, 'provider 响应缺少 content');
+    }
+
+    const intent = parseMusicIntentJson(content, input.userText);
+    if (!intent) {
+      return buildIntentFailure(provider, startedAt, 'provider 输出无法解析为 MusicIntent');
+    }
+
+    return {
+      ok: true,
+      intent,
+      providerId: provider.id,
+      model: provider.model,
+      elapsedMs: Date.now() - startedAt,
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : 'provider 请求异常';
+    return buildIntentFailure(provider, startedAt, reason);
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 /*
@@ -215,6 +321,30 @@ function parseChatResponseJson(
 }
 
 /*
+ * 解析选曲意图 JSON。
+ * 兼容模型偶尔包 Markdown 或前后解释的输出。
+ */
+function parseMusicIntentJson(content: string, userText: string): MusicIntent | null {
+  const candidates = [
+    content.trim(),
+    stripMarkdownFence(content.trim()),
+    extractJsonObject(content),
+  ].filter((value): value is string => Boolean(value));
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate) as unknown;
+      const normalized = normalizeMusicIntent(parsed, userText);
+      if (normalized) return normalized;
+    } catch {
+      /* 尝试下一个候选 JSON 片段 */
+    }
+  }
+
+  return null;
+}
+
+/*
  * 去掉模型可能返回的 Markdown 代码块包裹。
  * 即便 prompt 禁止 Markdown，也要在运行时兜底。
  */
@@ -247,18 +377,58 @@ function normalizeChatResponse(
 ): ChatResponse | null {
   if (!isRecord(value)) return null;
 
-  const say = normalizeText(value.say, 160);
+  const say = normalizeText(value.say, 280);
   if (!say) return null;
 
   const play = normalizePlayList(value.play, selectedTrack, candidateTracks);
-  const reason = normalizeText(value.reason, 160);
-  const segue = normalizeText(value.segue, 120);
+  const reason = normalizeText(value.reason, 220);
+  const segue = sanitizeDjText(normalizeText(value.segue, 160));
 
   return {
-    say,
+    say: sanitizeDjText(say) ?? say,
     play,
     ...(reason ? { reason } : {}),
     ...(segue ? { segue } : {}),
+  };
+}
+
+/*
+ * 清理主播文案中的播放器操作话术。
+ * prompt 已禁止，但模型偶尔仍会说“把音量调到...”；运行时兜底避免产品露出错误操作感。
+ */
+function sanitizeDjText(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  return value
+    .replace(/让我们把音量调到[^，。！？!?]*[，。！？!?]?/g, '')
+    .replace(/让我们把音量调低[^，。！？!?]*[，。！？!?]?/g, '')
+    .replace(/把音量调到[^，。！？!?]*[，。！？!?]?/g, '')
+    .replace(/把音量调低[^，。！？!?]*[，。！？!?]?/g, '')
+    .replace(/把音量调小[^，。！？!?]*[，。！？!?]?/g, '')
+    .replace(/调小音量[^，。！？!?]*[，。！？!?]?/g, '')
+    .replace(/调低音量[^，。！？!?]*[，。！？!?]?/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/*
+ * 将 unknown 规范化为 MusicIntent。
+ * searchQuery 为空时回退用户原文，保证音乐解析仍有输入。
+ */
+function normalizeMusicIntent(value: unknown, userText: string): MusicIntent | null {
+  if (!isRecord(value)) return null;
+
+  const preferredTitles = normalizeStringList(value.preferredTitles, 3, 80);
+  const searchQuery = normalizeText(value.searchQuery, 80) ?? preferredTitles[0] ?? userText.trim();
+  if (!searchQuery) return null;
+
+  const mood = normalizeText(value.mood, 40);
+  const note = normalizeText(value.note, 120);
+
+  return {
+    preferredTitles,
+    searchQuery,
+    ...(mood ? { mood } : {}),
+    ...(note ? { note } : {}),
   };
 }
 
@@ -271,6 +441,18 @@ function normalizeText(value: unknown, maxLength: number): string | undefined {
   const trimmed = value.trim();
   if (!trimmed) return undefined;
   return trimmed.slice(0, maxLength);
+}
+
+/* 规范化字符串数组字段。 */
+function normalizeStringList(value: unknown, maxItems: number, maxLength: number): string[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim().slice(0, maxLength))
+    .filter((item) => item.length > 0)
+    .filter((item, index, all) => all.indexOf(item) === index)
+    .slice(0, maxItems);
 }
 
 /*
@@ -316,6 +498,23 @@ function buildFailure(
   startedAt: number,
   reason: string,
 ): GenerateDjResponseResult {
+  return {
+    ok: false,
+    reason: `${provider.displayName} ${reason}`,
+    providerId: provider.id,
+    elapsedMs: Date.now() - startedAt,
+  };
+}
+
+/*
+ * 构造选曲意图失败结果。
+ * 和 DJ 失败同样脱敏，避免 provider 细节污染公开响应。
+ */
+function buildIntentFailure(
+  provider: ProviderConfig,
+  startedAt: number,
+  reason: string,
+): GenerateMusicIntentResult {
   return {
     ok: false,
     reason: `${provider.displayName} ${reason}`,

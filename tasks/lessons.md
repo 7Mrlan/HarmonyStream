@@ -341,3 +341,27 @@
 **规则**：1. 修复依赖矩阵后必须做一次反向验证：删掉 shim / override / 重复配置后跑 typecheck。2. 只有删掉会复现问题的兜底才能保留，并且必须写明本地验证证据。3. 根 `package.json` 的 pnpm overrides 必须能被 `pnpm why` 或明确 issue 链路证明，否则视为临时垃圾优先删除。
 
 **关联文件**：`apps/mobile/nativewind-env.d.ts`、`packages/ui/nativewind-env.d.ts`、`apps/mobile/tsconfig.json`、`packages/ui/tsconfig.json`、`package.json`
+
+---
+
+## 2026-05-23 - 诊断信息不能伪装成产品入口
+
+**触发**：为解释当前音乐 provider 状态，我把 `SOURCE / FALLBACK` 诊断条直接放进主播放界面。用户指出它看起来 low，且不清楚这个功能是干什么的。
+
+**根因**：把开发者排障信息当成用户功能交付，缺少产品语义和成熟交互设计；诊断条既不是“音乐插件入口”，也不能解决真实 LLM / 真实音源未配置的问题。
+
+**规则**：1. 诊断接口可以保留在服务端或开发工具里，但不要直接出现在主产品界面。2. 面向用户的“插件 / 音源管理”必须先定义目标用户动作、状态文案和入口位置，再设计交互；不能用 provider id / missing env 这种开发语言当产品文案。3. 若需要复杂展开面板，优先使用成熟抽屉 / sheet 形态或项目已有 Reanimated 交互模式，避免临时堆一个静态卡片。
+
+**关联文件**：`apps/mobile/app/index.tsx`、`server/src/routes/apiRoutes.ts`、`tasks/spec.md`
+
+---
+
+## 2026-05-24 - 参考成熟项目时必须区分“上游事实”和“本项目设计目标”
+
+**触发**：评估 LX Mobile 用户源方案时，我把“源脚本长驻加载”说成参考方向，但 LX Mobile 的事实是切换源时 `destroy()` 后再 `loadScript()`；用户指出该表述会影响 Spec 生命周期设计。
+
+**根因**：把性能优化目标和上游实际实现混在一起，没有明确说明“这是 Claudio 的设计选择，不是 LX 原样行为”。
+
+**规则**：1. 引用外部项目时先写事实：文件路径、函数、真实生命周期。2. 再写本项目决策：哪些照搬、哪些只参考、哪些因架构不同而改写。3. 性能类词汇如“常驻 / 热切换 / 缓存 / worker”必须定义范围和失效条件，不能笼统描述。4. 如果方案涉及不可信代码执行，必须同时写清隔离模型和替换层兼容风险。
+
+**关联文件**：`tasks/spec.md` §11、`lx-music-mobile-1.8.4/src/core/userApi.ts`、`lx-music-mobile-1.8.4/src/utils/nativeModules/userApi.ts`

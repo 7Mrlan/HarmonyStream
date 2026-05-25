@@ -91,11 +91,13 @@ export function registerApiRoutes(app: FastifyInstance): void {
       type: 'queue-update',
       queue: result.queue,
     });
-    broadcastStreamEvent({
-      type: 'now-playing',
-      track: result.currentTrack,
-      position: 0,
-    });
+    if (result.currentTrack) {
+      broadcastStreamEvent({
+        type: 'now-playing',
+        track: result.currentTrack,
+        position: 0,
+      });
+    }
 
     return result.response;
   });

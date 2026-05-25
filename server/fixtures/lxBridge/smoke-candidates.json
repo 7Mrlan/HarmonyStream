@@ -1,0 +1,17 @@
+{
+  "candidates": [
+    {
+      "id": "pixel-reverie",
+      "source": "kw",
+      "title": "Pixel Reverie",
+      "artist": "Smoke Source",
+      "durationMs": 288000,
+      "quality": "128k",
+      "musicInfo": {
+        "id": "pixel-reverie",
+        "name": "Pixel Reverie",
+        "singer": "Smoke Source"
+      }
+    }
+  ]
+}

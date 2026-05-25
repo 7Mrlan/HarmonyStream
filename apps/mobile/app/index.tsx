@@ -18,7 +18,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, ScrollView, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { createApiClient, type ModelInfo, type StreamEvent, type Track } from '@claudio/api';
+import {
+  createApiClient,
+  type ModelInfo,
+  type StreamEvent,
+  type Track,
+} from '@claudio/api';
 import {
   ChatInput,
   ConnectionStatus,
@@ -55,8 +60,15 @@ const DEFAULT_DJ_TEXT =
 const WIDE_BREAKPOINT = 768;
 /* PC 端内容最大宽度，超出留白填补氛围 */
 const CONTENT_MAX_WIDTH = 720;
+/* 主播 talk-over 时的背景音乐音量：保留氛围但不压住人声。 */
+const TTS_DUCKING_VOLUME = 0.24;
 
 type ConnectionState = 'connected' | 'connecting' | 'offline';
+
+interface UserMessage {
+  text: string;
+  time: string;
+}
 
 /*
  * 生成当前 UI 时间戳。
@@ -90,10 +102,10 @@ export default function HomeScreen() {
   const apiClient = useMemo(() => createApiClient({ baseUrl: getApiBaseUrl() }), []);
   /* 服务端模型列表，控制 TopBar 和宠物切换 */
   const [models, setModels] = useState<ModelInfo[]>([]);
-  /* 服务端曲目队列，非空时覆盖本地 SoundHelix 默认列表 */
+  /* 服务端曲目队列。为空时播放器保持空信号，不播放本地 demo 曲。 */
   const [serverPlaylist, setServerPlaylist] = useState<RadioTrack[]>([]);
-  /* 真实音频播放引擎：替换 v1 的 mock playing/position */
-  const radio = useRadioPlayer(serverPlaylist.length > 0 ? serverPlaylist : undefined);
+  /* 真实音频播放引擎：只消费服务端下发的真实曲目。 */
+  const radio = useRadioPlayer(serverPlaylist);
   /* Phase F：把当前曲目同步给系统锁屏 / 媒体会话，用于后台播放和锁屏展示。 */
   useNowPlayingMedia({
     player: radio.lockScreenPlayer,
@@ -120,6 +132,9 @@ export default function HomeScreen() {
   const [djText, setDjText] = useState(DEFAULT_DJ_TEXT);
   const [djTime, setDjTime] = useState('21:02');
   const [djLoading, setDjLoading] = useState(false);
+  const [chatSending, setChatSending] = useState(false);
+  const chatSendingRef = useRef(false);
+  const [latestUserMessage, setLatestUserMessage] = useState<UserMessage | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
   const [failedArtworkUrl, setFailedArtworkUrl] = useState<string | null>(null);
   /* Phase E：voice 开关；默认关闭，避免首次启动突然出声。点击 ChatInput 旁的喇叭切换。 */
@@ -152,9 +167,9 @@ export default function HomeScreen() {
    * 用服务端曲目刷新播放器队列。
    * 只接受有 url 的 Track，避免播放器收到不可播放条目。
    */
-  const applyApiTracks = useCallback((tracks: Array<Track | null | undefined>) => {
+  const applyApiTracks = useCallback((tracks: Array<Track | null | undefined>, allowEmpty = false) => {
     const mappedTracks = mapApiTracksToRadioTracks(tracks);
-    if (mappedTracks.length > 0) setServerPlaylist(mappedTracks);
+    if (mappedTracks.length > 0 || allowEmpty) setServerPlaylist(mappedTracks);
   }, []);
 
   /*
@@ -162,9 +177,8 @@ export default function HomeScreen() {
    * `/api/chat` 成功后调用，确保播放器拿到真实可播放 Track。
    */
   const refreshNowAndNext = useCallback(async () => {
-    const now = await apiClient.getNow();
-    const next = await apiClient.getNext();
-    applyApiTracks([now.track, next.track]);
+    const [now, next] = await Promise.all([apiClient.getNow(), apiClient.getNext()]);
+    applyApiTracks([now.track, next.track], true);
   }, [apiClient, applyApiTracks]);
 
   /*
@@ -189,7 +203,7 @@ export default function HomeScreen() {
     apiClient
       .getNext()
       .then((next) => {
-        applyApiTracks([next.track]);
+        applyApiTracks([next.track], false);
       })
       .catch(() => {
         /* 预热失败不影响当前播放，静默处理。 */
@@ -223,7 +237,7 @@ export default function HomeScreen() {
       }
 
       if (event.type === 'queue-update') {
-        applyApiTracks(event.queue);
+        applyApiTracks(event.queue, true);
       }
 
       if (event.type === 'tts-ready') {
@@ -260,7 +274,7 @@ export default function HomeScreen() {
         if (disposed) return;
         setModels(modelsResponse.available);
         setPetId(modelsResponse.current);
-        applyApiTracks([nowResponse.track]);
+        applyApiTracks([nowResponse.track], true);
         setConnectionState('connected');
       } catch {
         if (disposed) return;
@@ -311,11 +325,12 @@ export default function HomeScreen() {
   }, [apiClient, applyApiTracks, handleStreamEvent]);
 
   /*
-   * Phase E ducking：TTS 播放期间把音乐音量降到 0.3，结束后恢复 1.0。
+   * TTS ducking：主播说话期间把音乐音量降到 0.24，结束后恢复 1.0。
+   * 这里控制的是音量，不改变音乐音调；talk-over 更符合电台听感。
    * 仅观察 tts.playing 切换；setVolume 内部已做平台兜底。
    */
   useEffect(() => {
-    radio.setVolume(tts.playing ? 0.3 : 1);
+    radio.setVolume(tts.playing ? TTS_DUCKING_VOLUME : 1);
   }, [radio, tts.playing]);
 
   /*
@@ -325,9 +340,14 @@ export default function HomeScreen() {
    */
   const handleSend = useCallback(
     async (text: string) => {
+      if (chatSendingRef.current) return;
+      const sentAt = formatBubbleTime();
+      chatSendingRef.current = true;
+      setChatSending(true);
       setConnectionState('connecting');
       setDjLoading(true);
-      setDjTime(formatBubbleTime());
+      setDjTime(sentAt);
+      setLatestUserMessage({ text, time: sentAt });
 
       try {
         const response = await apiClient.sendChat({ text, voice: ttsEnabled });
@@ -341,6 +361,9 @@ export default function HomeScreen() {
         setDjTime(formatBubbleTime());
         setDjLoading(false);
         setConnectionState('offline');
+      } finally {
+        chatSendingRef.current = false;
+        setChatSending(false);
       }
     },
     [apiClient, refreshNowAndNext, ttsEnabled],
@@ -487,7 +510,9 @@ export default function HomeScreen() {
           />
 
           {/* 用户短回复气泡 */}
-          <UserBubble text="好听" name="MMGUO" time="21:09" />
+          {latestUserMessage ? (
+            <UserBubble text={latestUserMessage.text} name="MMGUO" time={latestUserMessage.time} />
+          ) : null}
 
           {/* 占位高度，避免 ChatInput 紧贴底部 */}
           <View style={{ height: 16 }} />
@@ -502,7 +527,7 @@ export default function HomeScreen() {
             maxWidth: isWide ? CONTENT_MAX_WIDTH : undefined,
           }}
         >
-          <ChatInput onSend={handleSend} onMicPress={() => undefined} />
+          <ChatInput sending={chatSending} onSend={handleSend} onMicPress={() => undefined} />
           <ConnectionStatus state={connectionState} />
         </View>
       </View>

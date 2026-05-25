@@ -1,0 +1,18 @@
+{
+  "candidates": [
+    {
+      "id": "request-smoke",
+      "source": "kw",
+      "title": "Request Smoke",
+      "artist": "Smoke Source",
+      "durationMs": 120000,
+      "quality": "128k",
+      "musicInfo": {
+        "id": "request-smoke",
+        "name": "Request Smoke",
+        "singer": "Smoke Source",
+        "requestSmokeBaseUrl": "http://127.0.0.1:8092"
+      }
+    }
+  ]
+}
