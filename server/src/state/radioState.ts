@@ -10,36 +10,54 @@ import type {
   ChatRequest,
   ChatResponse,
   ModelInfo,
-  ModelsResponse,
   NextResponse,
   NowResponse,
   PlaybackCapabilities,
   PlaybackMoveResponse,
-  SwitchModelResponse,
   Track,
 } from '@claudio/api';
-import { generateDjResponse, generateMusicIntent, generateTrackCommentary, type GenerateMusicIntentResult } from '../llm/llmAdapter.js';
+import { generateDjResponse, generateMusicIntent, type GenerateMusicIntentResult } from '../llm/llmAdapter.js';
 import { cloneTrack } from '../music/fallbackCatalog.js';
 import { resolveTracksForChat } from '../music/musicResolver.js';
 import { cancelPendingPreloads, schedulePreload } from '../music/preload.js';
-import { isSameTitle } from '../music/titleMatch.js';
 import { broadcastStreamEvent } from '../realtime/streamHub.js';
 import {
   buildFallbackChatResponse,
   buildNoTrackChatResponse,
   buildQuickSongChatResponse,
-  buildTrackSwitchChatResponse,
 } from '../radio/djCopy.js';
 import {
   buildExplicitMusicIntent,
   buildGenreMusicIntent,
-  type MusicRequestKind,
   parseExplicitSongRequest,
   parseGenericRecommendationRequest,
   parseGenreRecommendationRequest,
   parseMusicRequestKind,
 } from '../radio/intentParser.js';
-import { nextChatId, scheduleTrackTts, scheduleTts } from '../tts/scheduler.js';
+import {
+  buildQueue,
+  chooseTrackFromPlay,
+  getPlaybackCapabilitiesForState,
+  getQueueFromIndex,
+  getTrackKey,
+} from '../radio/playbackQueue.js';
+import {
+  buildSessionIntent,
+  createSessionMemory,
+  getTargetQueueSize,
+  markTrackSeen,
+  maybeRefillQueue as maybeRefillSessionQueue,
+  resetSessionMemory as resetRadioSessionMemory,
+  type RadioSessionIntent,
+} from '../radio/radioSession.js';
+import {
+  createTrackCommentaryMemory,
+  resetTrackCommentaryMemory,
+  scheduleTrackCommentary as scheduleTrackCommentaryService,
+} from '../radio/trackCommentaryService.js';
+import { nextChatId, scheduleTts } from '../tts/scheduler.js';
+import { getCurrentModel } from './modelState.js';
+export { getModels, switchModel } from './modelState.js';
 
 type RadioPlaybackState = NowResponse['state'];
 type SuccessfulMusicIntent = Extract<GenerateMusicIntentResult, { ok: true }>;
@@ -49,22 +67,10 @@ interface RadioState {
   queue: Track[];
   currentIndex: number;
   messages: ChatResponse[];
-  currentModel: string;
   playbackState: RadioPlaybackState;
   activeIntent: RadioSessionIntent | null;
-  seenTrackKeys: Set<string>;
-  commentaryCache: Map<string, ChatResponse>;
-  refillInFlight: Promise<void> | null;
-  commentaryToken: string | null;
-}
-
-interface RadioSessionIntent {
-  userText: string;
-  searchText: string;
-  preferredTitles: string[];
-  requestKind: MusicRequestKind;
-  targetQueueSize: number;
-  voiceEnabledAtChat: boolean;
+  sessionMemory: ReturnType<typeof createSessionMemory>;
+  trackCommentaryMemory: ReturnType<typeof createTrackCommentaryMemory>;
 }
 
 export interface ChatResult {
@@ -73,75 +79,20 @@ export interface ChatResult {
   queue: Track[];
 }
 
-const DEFAULT_MODEL_ID = 'deepseek';
 const CHAT_TOTAL_TIMEOUT_MS = 10_000;
-
-const MODELS: ModelInfo[] = [
-  {
-    id: 'deepseek',
-    displayName: 'DeepSeek',
-    petSprite: 'deepseek',
-  },
-  {
-    id: 'qwen',
-    displayName: '通义千问',
-    petSprite: 'qwen',
-  },
-  {
-    id: 'glm',
-    displayName: '智谱 GLM',
-    petSprite: 'glm',
-  },
-];
 
 const radioState: RadioState = {
   currentTrack: null,
   queue: [],
   currentIndex: 0,
   messages: [],
-  currentModel: DEFAULT_MODEL_ID,
   playbackState: 'idle',
   activeIntent: null,
-  seenTrackKeys: new Set<string>(),
-  commentaryCache: new Map<string, ChatResponse>(),
-  refillInFlight: null,
-  commentaryToken: null,
+  sessionMemory: createSessionMemory(),
+  trackCommentaryMemory: createTrackCommentaryMemory(),
 };
 
 let chatQueue: Promise<void> = Promise.resolve();
-
-/*
- * 获取模型列表。
- * 返回浅拷贝，避免路由层误改全局模型配置。
- */
-export function getModels(): ModelsResponse {
-  return {
-    current: radioState.currentModel,
-    available: MODELS.map((model) => ({ ...model })),
-  };
-}
-
-/*
- * 切换当前 AI 模型。
- * Phase A 只切换内存状态，不触发真实 LLM provider 初始化。
- */
-export function switchModel(id: string): SwitchModelResponse {
-  const model = MODELS.find((item) => item.id === id);
-
-  if (!model) {
-    return {
-      ok: false,
-      current: radioState.currentModel,
-    };
-  }
-
-  radioState.currentModel = model.id;
-
-  return {
-    ok: true,
-    current: radioState.currentModel,
-  };
-}
 
 /*
  * 获取当前播放状态。
@@ -268,9 +219,7 @@ async function handleChatInternal(request: ChatRequest): Promise<ChatResult> {
     radioState.queue = [];
     radioState.currentIndex = 0;
     radioState.activeIntent = null;
-    radioState.seenTrackKeys.clear();
-    radioState.commentaryCache.clear();
-    radioState.commentaryToken = null;
+    resetSessionMemory([]);
     radioState.messages = [...radioState.messages, response].slice(-20);
 
     return {
@@ -355,7 +304,7 @@ export function playNextTrack(): PlaybackMoveResponse {
     return buildPlaybackMoveFailure('queue exhausted');
   }
 
-  markTrackSeen(radioState.queue[radioState.currentIndex]);
+  markTrackSeen(radioState.sessionMemory, radioState.queue[radioState.currentIndex]);
   return moveToQueueIndex(nextIndex, 'next');
 }
 
@@ -476,8 +425,7 @@ function buildPlaybackMoveFailure(reason: string): PlaybackMoveResponse {
  * currentIndex 之前的历史不推给客户端，上一首由服务端 API 负责，避免前后端索引分叉。
  */
 function getQueueFromCurrentIndex(): Track[] {
-  const startIndex = Math.max(0, Math.min(radioState.currentIndex, radioState.queue.length));
-  return radioState.queue.slice(startIndex).map(cloneTrack);
+  return getQueueFromIndex(radioState.queue, radioState.currentIndex);
 }
 
 /*
@@ -485,39 +433,12 @@ function getQueueFromCurrentIndex(): Track[] {
  * 服务端 currentIndex 是队列权威；客户端只根据这里的结果启用 / 禁用上一首和下一首。
  */
 export function getPlaybackCapabilities(): PlaybackCapabilities {
-  const hasTrack = Boolean(radioState.currentTrack);
-  const queueSize = radioState.queue.length;
-  const currentIndex = Math.max(0, Math.min(radioState.currentIndex, Math.max(queueSize - 1, 0)));
-  const canAutoRefill = Boolean(radioState.activeIntent && radioState.activeIntent.requestKind !== 'explicit');
-
-  return {
-    canPrevious: hasTrack && currentIndex > 0,
-    canNext: hasTrack && currentIndex + 1 < queueSize,
-    queueSize,
-    currentIndex,
-    canAutoRefill,
-  };
-}
-
-/*
- * 创建本轮电台 session 意图。
- * 后台续推只读取这里保存的检索线索，不重新调用 LLM 做意图判断。
- */
-function buildSessionIntent(intent: RadioSessionIntent): RadioSessionIntent {
-  return {
-    ...intent,
-    preferredTitles: [...intent.preferredTitles],
-  };
-}
-
-/*
- * 按请求类型决定当前 session 的目标队列长度。
- * 单曲保持精准，范围推荐给 3 首，明确歌单给 5 首，控制外部音源压力。
- */
-function getTargetQueueSize(kind: MusicRequestKind): number {
-  if (kind === 'explicit') return 1;
-  if (kind === 'multi') return 5;
-  return 3;
+  return getPlaybackCapabilitiesForState({
+    currentTrack: radioState.currentTrack,
+    queue: radioState.queue,
+    currentIndex: radioState.currentIndex,
+    canAutoRefill: Boolean(radioState.activeIntent && radioState.activeIntent.requestKind !== 'explicit'),
+  });
 }
 
 /*
@@ -525,24 +446,8 @@ function getTargetQueueSize(kind: MusicRequestKind): number {
  * 初始队列立即写入 seen，避免后台续推把同一批候选重复补回来。
  */
 function resetSessionMemory(queue: Track[]): void {
-  radioState.seenTrackKeys.clear();
-  radioState.commentaryCache.clear();
-  radioState.commentaryToken = null;
-  radioState.refillInFlight = null;
-  for (const track of queue) {
-    markTrackSeen(track);
-  }
-}
-
-/* 将曲目标记为当前 session 已见过。 */
-function markTrackSeen(track: Track | null | undefined): void {
-  const key = getTrackKey(track);
-  if (key) radioState.seenTrackKeys.add(key);
-}
-
-/* 取曲目去重 key，优先使用稳定 id，没有 id 时退回 URL。 */
-function getTrackKey(track: Track | null | undefined): string {
-  return track?.id || track?.url || '';
+  resetRadioSessionMemory(radioState.sessionMemory, queue);
+  resetTrackCommentaryMemory(radioState.trackCommentaryMemory);
 }
 
 /*
@@ -550,47 +455,22 @@ function getTrackKey(track: Track | null | undefined): string {
  * 同一时间只允许一个续推任务；失败只写日志，不影响当前播放和切歌返回。
  */
 function maybeRefillQueue(reason: string): void {
-  const intent = radioState.activeIntent;
-  if (!intent || intent.requestKind === 'explicit') return;
-  if (getRemainingQueueCount() >= intent.targetQueueSize) return;
-  if (radioState.refillInFlight) return;
-
-  const refillTask = runQueueRefill(intent, reason).finally(() => {
-    if (radioState.refillInFlight === refillTask) {
-      radioState.refillInFlight = null;
-    }
+  maybeRefillSessionQueue({
+    intent: radioState.activeIntent,
+    memory: radioState.sessionMemory,
+    reason,
+    getQueue: () => radioState.queue.map(cloneTrack),
+    getRemainingQueueCount,
+    isIntentCurrent: (intent) => radioState.activeIntent === intent,
+    appendTracks: appendResolvedTracksToQueue,
+    broadcastQueueUpdate: () => {
+      broadcastStreamEvent({
+        type: 'queue-update',
+        queue: getQueueFromCurrentIndex(),
+        playback: getPlaybackCapabilities(),
+      });
+    },
   });
-  radioState.refillInFlight = refillTask;
-}
-
-/*
- * 执行真实续推。
- * 这里只做音乐解析和去重，不生成新意图，不等待主播文案。
- */
-async function runQueueRefill(intent: RadioSessionIntent, reason: string): Promise<void> {
-  try {
-    const missing = Math.max(0, intent.targetQueueSize - getRemainingQueueCount());
-    if (missing <= 0) return;
-
-    const plan = await resolveTracksForChat({
-      userText: intent.searchText || intent.userText,
-      preferredTitles: intent.preferredTitles,
-      limit: Math.max(missing + radioState.seenTrackKeys.size, intent.targetQueueSize),
-    });
-    if (radioState.activeIntent !== intent) return;
-
-    const appended = appendResolvedTracksToQueue(plan.tracks);
-    if (appended.length === 0) return;
-
-    console.info(`[radio] queue refilled by ${reason}: +${appended.length}`);
-    broadcastStreamEvent({
-      type: 'queue-update',
-      queue: getQueueFromCurrentIndex(),
-      playback: getPlaybackCapabilities(),
-    });
-  } catch (error) {
-    console.warn('[radio] queue refill failed:', error instanceof Error ? error.message : error);
-  }
 }
 
 /*
@@ -598,24 +478,12 @@ async function runQueueRefill(intent: RadioSessionIntent, reason: string): Promi
  * 追加前过滤本 session 已见过和队列里已有的曲目，并把成功追加的曲目写入 seen。
  */
 function appendResolvedTracksToQueue(tracks: Track[]): Track[] {
-  const intent = radioState.activeIntent;
-  const targetSize = intent?.targetQueueSize ?? getRemainingQueueCount();
-  const existing = new Set(radioState.queue.map(getTrackKey).filter(Boolean));
-  const existingTitles = radioState.queue.map((track) => track.title);
   const appended: Track[] = [];
 
   for (const track of tracks) {
-    if (getRemainingQueueCount() >= targetSize) break;
-    const key = getTrackKey(track);
-    if (!key || existing.has(key) || radioState.seenTrackKeys.has(key)) continue;
-    if (existingTitles.some((title) => isSameTitle(title, track.title))) continue;
-
     const cloned = cloneTrack(track);
     radioState.queue.push(cloned);
-    existing.add(key);
-    existingTitles.push(cloned.title);
-    radioState.seenTrackKeys.add(key);
-    appended.push(cloneTrack(cloned));
+    appended.push(cloned);
   }
 
   return appended;
@@ -632,68 +500,18 @@ function getRemainingQueueCount(): number {
  * 播报是附加体验：不阻塞切歌，不阻塞队列续推，任何失败都静默回退或丢弃。
  */
 function scheduleTrackCommentary(track: Track, cause: 'next' | 'previous'): void {
-  const intent = radioState.activeIntent;
-  if (!intent) return;
-
-  const trackKey = getTrackKey(track);
-  if (!trackKey) return;
-
-  const cached = radioState.commentaryCache.get(trackKey);
-  if (cached) {
-    setTimeout(() => {
-      if (!isCurrentTrackKey(trackKey)) return;
-      broadcastTrackCommentary(trackKey, cached);
-      if (intent.voiceEnabledAtChat) {
-        scheduleTrackTts(cached.say, trackKey, () => isCurrentTrackKey(trackKey));
-      }
-    }, 0);
-    return;
-  }
-
-  radioState.commentaryToken = `${trackKey}:${Date.now()}`;
-  const token = radioState.commentaryToken;
-  void runTrackCommentary(track, cause, trackKey, token);
-}
-
-/*
- * 生成并广播切歌短播报。
- * 先尝试 LLM，失败时使用 djCopy 模板；广播前后都检查 token，避免旧歌播报迟到。
- */
-async function runTrackCommentary(
-  track: Track,
-  cause: 'next' | 'previous',
-  trackKey: string,
-  token: string,
-): Promise<void> {
-  const intent = radioState.activeIntent;
-  if (!intent) return;
-
-  try {
-    const currentModel = getCurrentModel();
-    const generated = await generateTrackCommentary({
-      userText: intent.userText,
-      modelId: currentModel.id,
-      modelDisplayName: currentModel.displayName,
-      currentTrack: null,
-      selectedTrack: track,
-      cause,
-    });
-    const response = generated.ok
-      ? generated.response
-      : buildTrackSwitchChatResponse(track, intent.userText, cause);
-
-    if (radioState.commentaryToken !== token || !isCurrentTrackKey(trackKey)) return;
-
-    radioState.commentaryCache.set(trackKey, response);
-    radioState.messages = [...radioState.messages, response].slice(-20);
-    broadcastTrackCommentary(trackKey, response);
-
-    if (intent.voiceEnabledAtChat) {
-      scheduleTrackTts(response.say, trackKey, () => isCurrentTrackKey(trackKey));
-    }
-  } catch (error) {
-    console.warn('[radio] track commentary failed:', error instanceof Error ? error.message : error);
-  }
+  scheduleTrackCommentaryService({
+    memory: radioState.trackCommentaryMemory,
+    track,
+    cause,
+    intent: radioState.activeIntent,
+    currentModel: getCurrentModel(),
+    isCurrentTrackKey,
+    broadcast: broadcastTrackCommentary,
+    pushMessage: (response) => {
+      radioState.messages = [...radioState.messages, response].slice(-20);
+    },
+  });
 }
 
 /* 当前曲是否仍然匹配指定 key。 */
@@ -712,51 +530,4 @@ function broadcastTrackCommentary(trackId: string, response: ChatResponse): void
   });
 }
 
-/*
- * 获取当前模型信息。
- * 服务端内存状态是模型选择权威来源；找不到时回退默认模型，避免坏状态击穿 LLM adapter。
- */
-function getCurrentModel(): ModelInfo {
-  return (
-    MODELS.find((item) => item.id === radioState.currentModel) ??
-    MODELS.find((item) => item.id === DEFAULT_MODEL_ID) ?? {
-      id: DEFAULT_MODEL_ID,
-      displayName: 'DeepSeek',
-      petSprite: 'deepseek',
-    }
-  );
-}
-
-/*
- * 按 LLM play 字段从候选曲里选择当前曲。
- * 匹配不到时交回调用方使用预选曲，保证队列始终可播放。
- */
-function chooseTrackFromPlay(play: string[], candidateTracks: Track[]): Track | null {
-  for (const title of play) {
-    const matchedTrack = candidateTracks.find((track) => isSameTitle(track.title, title));
-    if (matchedTrack) return cloneTrack(matchedTrack);
-  }
-
-  return null;
-}
-
-/*
- * 构建当前队列。
- * 选中的当前曲放在队首，剩余候选曲保持 provider 顺序。
- */
-function buildQueue(currentTrack: Track, candidateTracks: Track[]): Track[] {
-  const currentKey = getTrackKey(currentTrack);
-  const titles = [currentTrack.title];
-  const tail: Track[] = [];
-
-  for (const track of candidateTracks) {
-    const key = getTrackKey(track);
-    if (key && key === currentKey) continue;
-    if (titles.some((title) => isSameTitle(title, track.title))) continue;
-    titles.push(track.title);
-    tail.push(cloneTrack(track));
-  }
-
-  return [cloneTrack(currentTrack), ...tail];
-}
 

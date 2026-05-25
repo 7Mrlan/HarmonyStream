@@ -67,6 +67,25 @@
 
 ---
 
-## 当前任务
+## 当前任务 · Phase J.1（radioState 编排拆分）
 
-- [ ] 等待下一轮功能点确认。
+- [x] 现状分析：定位 `server/src/state/radioState.ts` 的职责膨胀边界。
+- [x] 功能点方案：设计拆分后的模块边界、导出 API 和迁移顺序。
+- [x] 风险与决策：明确不改公开路由契约、不改变播放行为、不引入循环依赖。
+- [x] HARD-GATE：用户确认完整 Spec 后开始编码。
+- [x] 实现：抽出 `modelState.ts`。
+- [x] 实现：抽出 `playbackQueue.ts`。
+- [x] 实现：抽出 `radioSession.ts`。
+- [x] 实现：抽出 `trackCommentaryService.ts`。
+- [x] 实现：瘦身 `radioState.ts` 并保持 facade API 不变。
+- [x] 验证：typecheck / lint / server build / HTTP smoke。
+
+### Review
+
+- `server/src/state/radioState.ts` 从 762 行降到 534 行，保留路由 facade 导出不变。
+- 新增 `server/src/state/modelState.ts`，隔离模型列表和当前模型选择。
+- 新增 `server/src/radio/playbackQueue.ts`，隔离队列纯函数和按钮能力计算；不依赖 session 类型。
+- 新增 `server/src/radio/radioSession.ts`，隔离 activeIntent、seen、refillInFlight 和后台续推；追加曲目采用“返回 tracks，由 radioState push”的方式 A。
+- 新增 `server/src/radio/trackCommentaryService.ts`，隔离切歌短播报缓存、token 和 track-aware TTS。
+- 验证通过：`pnpm typecheck`、`pnpm lint`、`pnpm --filter server build`。
+- HTTP smoke 通过：单曲点歌 `queueSize=1/canNext=false`，范围推荐 `queueSize=3/canNext=true`，多首推荐 `queueSize=5/canNext=true`，`POST /api/playback/next` 后 `currentIndex=1/canPrevious=true`。
