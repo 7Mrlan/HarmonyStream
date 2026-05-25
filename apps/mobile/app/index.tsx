@@ -21,6 +21,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   createApiClient,
   type ModelInfo,
+  type PlaybackCapabilities,
   type StreamEvent,
   type Track,
 } from '@claudio/api';
@@ -71,6 +72,14 @@ interface UserMessage {
   time: string;
 }
 
+const DEFAULT_PLAYBACK_CAPABILITIES: PlaybackCapabilities = {
+  canPrevious: false,
+  canNext: false,
+  queueSize: 0,
+  currentIndex: 0,
+  canAutoRefill: false,
+};
+
 /*
  * 生成当前 UI 时间戳。
  * DJ 气泡只需要轻量展示，不参与服务端协议。
@@ -90,6 +99,25 @@ function getModelDisplayName(modelId: string, models: ModelInfo[]): string | und
     models.find((model) => model.id === modelId)?.displayName ??
     DEFAULT_PETS.find((pet) => pet.id === modelId)?.displayName
   );
+}
+
+/* 生成播放器曲目的稳定 key，供 track-aware TTS 做二次校验。 */
+function getRadioTrackKey(track: RadioTrack | null | undefined): string {
+  return track?.id || track?.url || '';
+}
+
+/*
+ * 旧服务端没有 playback 字段时的保守推断。
+ * 只在 bootstrap 首屏使用；后续缺字段的 queue-update 会保持上一份 capability。
+ */
+function inferPlaybackCapabilitiesFromQueue(queueLength: number): PlaybackCapabilities {
+  return {
+    canPrevious: false,
+    canNext: queueLength > 1,
+    queueSize: queueLength,
+    currentIndex: 0,
+    canAutoRefill: false,
+  };
 }
 
 export default function HomeScreen() {
@@ -132,6 +160,9 @@ export default function HomeScreen() {
   const [latestUserMessage, setLatestUserMessage] = useState<UserMessage | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
   const [failedArtworkUrl, setFailedArtworkUrl] = useState<string | null>(null);
+  const [playbackCapabilities, setPlaybackCapabilities] = useState<PlaybackCapabilities>(
+    DEFAULT_PLAYBACK_CAPABILITIES,
+  );
   /* Phase E / H：VOICE 只决定主播是否自动播报，不再接管主播放按钮。 */
   const [ttsEnabled, setTtsEnabledState] = useState(false);
   const ttsEnabledRef = useRef(ttsEnabled);
@@ -148,6 +179,16 @@ export default function HomeScreen() {
   const artworkUrl = radio.track.artwork;
   const showTrackArtwork = Boolean(artworkUrl && failedArtworkUrl !== artworkUrl);
   const artworkPanelSize = isWide ? 260 : 220;
+  const currentTrackKey = getRadioTrackKey(radio.track);
+  const currentTrackKeyRef = useRef(currentTrackKey);
+
+  /*
+   * WS 事件处理需要读取当前曲 key，但不能把它放进 handleStreamEvent 依赖。
+   * 否则每次切歌都会重建 stream 订阅，造成 WebSocket 断开重连。
+   */
+  useEffect(() => {
+    currentTrackKeyRef.current = currentTrackKey;
+  }, [currentTrackKey]);
 
   /*
    * 封面加载失败时切回原时钟占位。
@@ -197,6 +238,9 @@ export default function HomeScreen() {
   const refreshNowAndNext = useCallback(async () => {
     const [now, next] = await Promise.all([apiClient.getNow(), apiClient.getNext()]);
     applyApiTracks([now.track, next.track], true);
+    setPlaybackCapabilities(
+      now.playback ?? inferPlaybackCapabilitiesFromQueue([now.track, next.track].filter(Boolean).length),
+    );
   }, [apiClient, applyApiTracks]);
 
   /*
@@ -212,6 +256,7 @@ export default function HomeScreen() {
     stationPaused,
     setStationPaused,
     applyApiTracks,
+    setPlaybackCapabilities,
   });
   const { playVoice } = station;
 
@@ -272,9 +317,20 @@ export default function HomeScreen() {
 
       if (event.type === 'queue-update') {
         applyApiTracks(event.queue, true);
+        if (event.playback) setPlaybackCapabilities(event.playback);
+        return;
+      }
+
+      if (event.type === 'track-commentary') {
+        if (event.trackId && event.trackId !== currentTrackKeyRef.current) return;
+        setDjText(event.say);
+        setDjTime(formatBubbleTime());
+        setDjLoading(false);
+        return;
       }
 
       if (event.type === 'tts-ready') {
+        if (event.trackId && event.trackId !== currentTrackKeyRef.current) return;
         /*
          * Phase H：tts-ready 只交给整站 controller。
          * controller 会按 VOICE 与整站暂停状态决定是否自动播放主播。
@@ -307,6 +363,9 @@ export default function HomeScreen() {
         setModels(modelsResponse.available);
         setPetId(modelsResponse.current);
         applyApiTracks([nowResponse.track], true);
+        setPlaybackCapabilities(
+          nowResponse.playback ?? inferPlaybackCapabilitiesFromQueue(nowResponse.track ? 1 : 0),
+        );
         setConnectionState('connected');
       } catch {
         if (disposed) return;
@@ -507,6 +566,8 @@ export default function HomeScreen() {
             playing={station.stationPlaying}
             ended={radio.ended}
             faved={faved}
+            prevDisabled={!playbackCapabilities.canPrevious}
+            nextDisabled={!playbackCapabilities.canNext}
             onPrev={station.previousTrack}
             onPlayPause={station.toggleStation}
             onNext={station.nextTrack}

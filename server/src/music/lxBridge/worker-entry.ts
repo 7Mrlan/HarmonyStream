@@ -12,6 +12,7 @@ import type {
   LxMusicCandidate,
   LxResolveMusicUrlRequest,
   LxResolvedUrl,
+  LxSearchMusicRequest,
   LxSourceCapability,
   LxSourceInitResult,
   LxSourceScript,
@@ -22,11 +23,14 @@ interface LxUserSourceRequest {
   /* LX source key。 */
   source: string;
   /* 请求动作。 */
-  action: 'musicUrl';
+  action: 'musicSearch' | 'musicUrl' | 'search';
   /* LX Mobile 传给用户源的 info。 */
   info: {
+    keyword?: string;
+    page?: number;
+    pagesize?: number;
     type?: string;
-    musicInfo: Record<string, unknown>;
+    musicInfo?: Record<string, unknown>;
   };
 }
 
@@ -109,6 +113,11 @@ async function handleWorkerMessage(raw: unknown): Promise<void> {
       sendResponse({ id: raw.id, ok: true, payload: result });
       return;
     }
+    if (raw.action === 'search-music') {
+      const result = await handleSearchMusic(raw.payload as LxSearchMusicRequest);
+      sendResponse({ id: raw.id, ok: true, payload: result });
+      return;
+    }
     if (raw.action === 'resolve-music-url') {
       const result = await handleResolveMusicUrl(raw.payload as LxResolveMusicUrlRequest);
       sendResponse({ id: raw.id, ok: true, payload: result });
@@ -123,7 +132,7 @@ async function handleWorkerMessage(raw: unknown): Promise<void> {
     sendResponse({
       id: raw.id,
       ok: false,
-      error: error instanceof Error ? error.message : 'LX worker 未知错误',
+      error: formatWorkerError(error),
     });
   }
 }
@@ -154,6 +163,34 @@ export async function handleLoadSource(payload: LxLoadSourcePayload): Promise<Lx
   const initResult = await waitForInit(script.hash);
   state.initResult = initResult;
   return initResult;
+}
+
+/*
+ * 请求用户源搜索候选。
+ * 默认音源带 musicSearch 能力时，优先复用源脚本自己的搜索链路，避免依赖单个公开搜索端点。
+ */
+export async function handleSearchMusic(
+  request: LxSearchMusicRequest,
+): Promise<LxMusicCandidate[]> {
+  if (!state.initResult || !state.requestHandler || !state.lx) {
+    throw new Error('LX 用户源尚未初始化');
+  }
+
+  const source = state.initResult.sources[request.source];
+  if (!source || !source.actions.includes('musicSearch')) {
+    return [];
+  }
+
+  const response = await state.requestHandler.call(state.lx, {
+    source: request.source,
+    action: 'musicSearch',
+    info: {
+      keyword: request.keyword,
+      page: 1,
+      pagesize: Math.max(1, request.limit),
+    },
+  });
+  return normalizeSearchResponse(request.source, response, request.limit);
 }
 
 /*
@@ -314,7 +351,7 @@ function normalizeInitData(data: unknown, scriptHash: string): LxSourceInitResul
     if (!isRecord(value)) continue;
     if (value.type !== 'music') continue;
     const actions = readStringArray(value.actions);
-    if (!actions.includes('musicUrl')) continue;
+    if (!actions.includes('musicUrl') && !actions.includes('musicSearch')) continue;
     sources[source] = {
       type: 'music',
       actions,
@@ -327,6 +364,83 @@ function normalizeInitData(data: unknown, scriptHash: string): LxSourceInitResul
   }
 
   return { scriptHash, sources };
+}
+
+/* 归一化用户源 musicSearch 返回值。 */
+function normalizeSearchResponse(source: string, response: unknown, limit: number): LxMusicCandidate[] {
+  const list = readSearchList(response).slice(0, Math.max(1, limit));
+  return list.map((item, index) => {
+    const title = readFirstString(item, ['name', 'title', 'songName', 'SONGNAME']) || '未知歌曲';
+    const artist = readFirstString(item, ['singer', 'artist', 'author', 'ARTIST']);
+    const album = readFirstString(item, ['albumName', 'album', 'ALBUM']);
+    const id = readFirstString(item, ['id', 'songmid', 'songId', 'rid', 'mid', 'hash', 'strMediaMid']) ||
+      `${source}-${normalizeSearchText(title)}-${index}`;
+    const duration = readDurationMs(item);
+
+    return {
+      id: `${source}-${id}`,
+      source,
+      title,
+      ...(artist ? { artist } : {}),
+      ...(album ? { album } : {}),
+      ...(duration ? { durationMs: duration } : {}),
+      quality: '128k',
+      musicInfo: item,
+    };
+  });
+}
+
+/* 读取常见 LX musicSearch 列表结构。 */
+function readSearchList(response: unknown): Record<string, unknown>[] {
+  if (Array.isArray(response)) return response.filter(isRecord);
+  if (!isRecord(response)) return [];
+  const direct = response.list;
+  if (Array.isArray(direct)) return direct.filter(isRecord);
+  const data = response.data;
+  if (Array.isArray(data)) return data.filter(isRecord);
+  if (isRecord(data) && Array.isArray(data.list)) return data.list.filter(isRecord);
+  if (isRecord(data) && Array.isArray(data.lists)) return data.lists.filter(isRecord);
+  return [];
+}
+
+/* 从候选对象多个可能字段里取第一个字符串。 */
+function readFirstString(value: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const raw = value[key];
+    if (typeof raw === 'string' && raw.trim()) return raw.trim();
+    if (typeof raw === 'number' && Number.isFinite(raw)) return String(raw);
+  }
+  return '';
+}
+
+/* 读取候选时长，统一转换为毫秒。 */
+function readDurationMs(value: Record<string, unknown>): number | undefined {
+  const raw = value.duration ?? value.interval ?? value.DURATION;
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) {
+    return raw > 1000 ? raw : raw * 1000;
+  }
+  if (typeof raw !== 'string') return undefined;
+  const trimmed = raw.trim();
+  if (/^\d+:\d{2}$/.test(trimmed)) {
+    const parts = trimmed.split(':').map((part) => Number.parseInt(part, 10));
+    const minutes = parts[0];
+    const seconds = parts[1];
+    if (
+      typeof minutes === 'number' &&
+      typeof seconds === 'number' &&
+      Number.isFinite(minutes) &&
+      Number.isFinite(seconds)
+    ) {
+      return (minutes * 60 + seconds) * 1000;
+    }
+  }
+  const numeric = Number.parseInt(trimmed, 10);
+  return Number.isFinite(numeric) && numeric > 0 ? (numeric > 1000 ? numeric : numeric * 1000) : undefined;
+}
+
+/* 生成兜底候选 id 片段。 */
+function normalizeSearchText(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, '-').slice(0, 48) || 'unknown';
 }
 
 /* 校验当前候选 source 是否支持 musicUrl 与指定音质。 */
@@ -420,6 +534,14 @@ function resetState(): void {
   state.requestHandler = null;
   state.lx = null;
   state.requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS;
+}
+
+/* 格式化跨 vm context 抛出的异常，避免非主 realm Error 被吞成“未知错误”。 */
+function formatWorkerError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (isRecord(error) && typeof error.message === 'string') return error.message;
+  if (typeof error === 'string') return error;
+  return String(error || 'LX worker 未知错误');
 }
 
 /* 发送 IPC 响应。 */

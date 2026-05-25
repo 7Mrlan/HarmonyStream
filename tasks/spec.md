@@ -8,10 +8,10 @@
 
 ## 当前活跃索引
 
-- 当前主线：AI 电台最小闭环。
-- 已完成：Phase A 后端 API 骨架；Phase B 移动端接入；Phase C LLM 主播；Phase C+ 等待体验；Phase D 音乐来源；Phase D.5 性能地基；Phase E TTS 入声；Phase F.0 SDK 56 依赖升级；Phase F.A 音频会话/后台权限；Phase F.B WS 心跳/重连；Phase F.C 锁屏 metadata 代码接线；Phase F.D APK 构建入口；Phase F.E 服务端 graceful shutdown。
-- 当前阶段：Phase I 默认 LX 双源池 + FLAC 优先。
-- 当前 HARD-GATE：Phase I 处于分段 Spec；现状分析确认后才能继续功能点方案，完整 Spec 确认前禁止编码。
+- 当前主线：AI 电台已完成“推荐队列体验清晰”，下一轮从 Phase K / L / M / N 路线图中选择。
+- 已完成：Phase A 后端 API 骨架；Phase B 移动端接入；Phase C LLM 主播；Phase C+ 等待体验；Phase D 音乐来源；Phase D.5 性能地基；Phase E TTS 入声；Phase F.0 SDK 56 依赖升级；Phase F.A 音频会话/后台权限；Phase F.B WS 心跳/重连；Phase F.C 锁屏 metadata 代码接线；Phase F.D APK 构建入口；Phase F.E 服务端 graceful shutdown；Phase J 队列与推荐体验收口。
+- 当前阶段：暂无活跃阶段，等待下一轮功能点确认。
+- 当前 HARD-GATE：下一轮中等及以上阶段必须重新分段 Spec（现状分析 → 功能点 → 风险与决策）并等待用户确认。
 - 当前边界：BYO-LLM 用户自配 key/baseUrl/model 单独作为 Phase F.5，不混入 Phase F 锁屏 / APK 验收。
 
 ---
@@ -74,6 +74,8 @@
 - Phase F.5 预留为 BYO-LLM：用户自配 API key、baseUrl、model、provider 参数。该阶段必须单独立 Spec，重点处理密钥存储、日志脱敏、运行时校验和 fallback；不得把用户 key 写入仓库、WS 事件、日志或公开响应。
 - LLM 输出必须经过运行时 JSON 解析和字段归一化，不信任模型裸输出。
 - LLM 的产品职责是“电台主播 + 选曲策划”，不是通用问答助手或搜索 UI 替代品：它应把用户评论转成播放意图，并给出自然过渡。
+- 主推荐和切歌播报必须隔离上下文：普通推荐默认只围绕本轮用户输入和本轮预选曲目；只有用户明确说“接着上一首 / 类似这首 / 换个同风格”时，主推荐才允许引用当前曲目。
+- 切歌短播报才允许讨论“从上一首到下一首”的关系；它必须短、异步、可过期丢弃，不能污染下一次普通推荐。
 - 没有 key、超时、HTTP 错误或解析失败时，服务端必须走 fallback，不让移动端断链。
 - DJ 等待态使用 `packages/ui/src/RadioTuningLoader.tsx`，基于 `explame/explame.html` 主调频模块 `280×88` 等比缩放。
 - 等待期间不显示本地假主播台词，不显示 `thinking`，只显示电台语义的调频加载。
@@ -138,6 +140,7 @@
 | Phase D.5 | 完成 | provider chain、TTL/LRU cache、Range route、客户端 60% 预热、metrics 已落地。 |
 | Phase E | 完成 | `msedge-tts` 接入；`tts-ready`、`/media/tts/:id`、独立 `useTtsPlayer`、DJBubble REPLAY 已落地。 |
 | Phase H | 完成 | 电台总控 / 歌曲队列 / 主播语音三层语义落地；完整历史见 `tasks/spec/phase-h-radio-playback-controls.md`。 |
+| Phase J | 完成 | 队列数量、上一首 / 下一首禁用、后台续推、切歌短播报与 track-aware TTS 过期保护已落地；完整历史见 `tasks/spec/phase-j-queue-recommendation-experience.md`。 |
 | Phase F.0 | 完成 | Expo SDK 56 / React 19.2.6 / RN 0.85.3 / TypeScript 6.0.3 升级完成；NativeWind 类型 shim 和临时 override 已清理。 |
 | Phase F.5 | 待启动 | BYO-LLM：用户自配 API key / baseUrl / model / provider 参数；必须单独立 Spec，不并入 Phase F.D。 |
 
@@ -260,3 +263,33 @@
 - 仍活跃决策：`LX_SOURCE_SCRIPT_URL` / `LX_SOURCE_SCRIPT_FILE` 显式配置时视为用户单源覆盖，provider id 保持 `lx`。
 - 仍活跃决策：`MUSIC_PROVIDER_CHAIN=lx` 的兼容展开只允许在 `server/src/music/providerRegistry.ts` / `parseChainConfig` 内完成，避免散落逻辑。
 - 仍活跃决策：服务端 ESM 代码的相对 import 必须带 `.js` 扩展，保证 `node dist/index.js` 可直接运行。
+
+---
+
+## 15. 产品迭代路线图
+
+> 本章节只保存跨阶段主线，避免长周期目标被单次性能优化或 bugfix 打散。
+> 当前阶段完整 Spec 仍写在本文件的当前阶段区；完成后归档到 `tasks/spec/<phase>.md`。
+
+### 15.1 主线顺序
+
+1. Phase J：队列与推荐体验收口。
+   - 明确单曲 / 情绪范围 / 多首歌单三类请求的队列数量。
+   - 明确上一首 / 下一首的可用状态，并让 UI 禁用不可用按钮。
+   - 明确用户主动切歌时主播是否播报、如何播报、是否重播旧播报。
+2. Phase K：像素海报。
+   - 当前已有 `Track.artwork -> TrackArtworkPanel -> PixelClock fallback` 链路；后续补真正轻量像素海报生成 / 缓存策略。
+3. Phase L：用户歌单 JSON 偏好。
+   - 导入歌单只作为口味种子，提取偏好并推荐相似但不固定的歌曲；不能把导入歌单变成固定播放列表。
+4. Phase M：用户音源导入 UI。
+   - 默认双源池已可开箱即用；后续设置页提供用户源导入、验证、回滚和沙箱状态展示。
+5. Phase N：真实音频律动。
+   - 当前频谱是视觉模拟；真实 FFT / PCM 律动需要单独评估 Web 与 Native 能力，不混入队列体验阶段。
+
+### 15.2 插队规则
+
+- P0 bug、安全问题、真机播放稳定性、明显性能回归可以插入为当前 Phase 的子阶段，例如 `Phase J.1`。
+- 插队阶段必须写清楚“插队原因、完成条件、回到哪条主线”，完成后回到本路线图的下一项。
+- 视觉增强不得抢在播放语义之前；偏好系统不得抢在队列语义之前；音源 UI 不得绕过 LX worker 沙箱。
+
+---

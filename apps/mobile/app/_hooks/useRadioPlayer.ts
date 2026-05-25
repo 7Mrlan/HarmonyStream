@@ -18,6 +18,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 /* 曲目元信息（v1 mock，v3 起接入电台 / 推荐 API） */
 export interface RadioTrack {
+  /* 服务端 Track.id，用于锁屏 / TTS / 队列事件和当前曲做稳定匹配。 */
+  id?: string;
   /* 远程或本地音频地址 */
   url: string;
   /* 显示用曲名 */

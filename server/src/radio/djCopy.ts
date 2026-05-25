@@ -55,13 +55,42 @@ export function buildNoTrackChatResponse(text: string, musicFallbackReason: stri
   };
 }
 
+/*
+ * 构建切歌短播报 fallback。
+ * 用于用户主动上一首 / 下一首后，LLM 不可用或超时时仍保持电台风格，不让 VOICE ON 变成空白。
+ */
+export function buildTrackSwitchChatResponse(
+  track: Track,
+  userText: string,
+  cause: 'next' | 'previous',
+): ChatResponse {
+  const title = track.title.trim();
+  const artist = track.artist?.trim();
+  const songName = artist ? `${artist}的《${title}》` : `《${title}》`;
+  const prompt = userText.trim() || '刚才这段频率';
+  const directionText = cause === 'previous' ? '把指针拨回去' : '往前换一格';
+  const templates = [
+    `${directionText}，到 ${songName}。别急着跳，先听它开头怎么把节拍摆出来。`,
+    `好，换 ${songName}。上一首如果太满，这首让耳朵重新找个落点。`,
+    `收到，${songName} 接上。换的不只是歌名，是这一段的速度。`,
+  ];
+  const say = pickStableTemplate(templates, `switch:${cause}:${artist ?? ''}:${title}:${prompt}`);
+
+  return {
+    say,
+    play: [title],
+    reason: `根据当前电台意图“${prompt}”切换到 ${title}。`,
+    segue: buildSongSegue(title, artist),
+  };
+}
+
 /* 点歌 intro 不编事实背景，只做氛围和情绪承接。 */
 function buildSongIntro(title: string, artist?: string): string {
   const songName = artist ? `${artist}的《${title}》` : `《${title}》`;
   const templates = [
-    `收到，这一首 ${songName} 接进来。把手边的事先放慢一点，跟着前奏的光往前走。`,
-    `好，今晚这段电台时间交给 ${songName}。别急着说话，先让旋律自己把画面铺开。`,
-    `${songName}，安排上。适合把音量留给耳朵，也留一点空白给刚刚想到的人。`,
+    `收到，${songName}。别铺垫太多，先听它第一段怎么落下来。`,
+    `好，切 ${songName}。这首不用端着，开头一出来就知道路数。`,
+    `${songName}，安排。先听人声怎么站住，再决定要不要跟着走。`,
   ];
   return pickStableTemplate(templates, `${artist ?? ''}:${title}`);
 }
@@ -70,9 +99,9 @@ function buildSongIntro(title: string, artist?: string): string {
 function buildSongSegue(title: string, artist?: string): string {
   const songName = artist ? `${artist}的《${title}》` : `《${title}》`;
   const templates = [
-    `我们把夜色交给 ${songName}。`,
-    `这一刻，让 ${songName} 往前开。`,
-    `现在进歌，${songName}。`,
+    `进歌，${songName}。`,
+    `${songName}，接住这一段。`,
+    `来，听 ${songName}。`,
   ];
   return pickStableTemplate(templates, `segue:${artist ?? ''}:${title}`);
 }
@@ -94,5 +123,5 @@ function buildMockDjScript(text: string, track: Track, modelDisplayName: string)
   const prompt = text || '今晚随便听点';
   const artist = track.artist ? `${track.artist}的` : '';
 
-  return `${modelDisplayName} 在 Claudio 的夜间频率里收到“${prompt}”。这一首 ${artist}《${track.title}》先接上，愿它刚好落在你现在的心情旁边。`;
+  return `${modelDisplayName} 收到“${prompt}”。先接 ${artist}《${track.title}》，不多解释，听它第一段怎么站住。`;
 }

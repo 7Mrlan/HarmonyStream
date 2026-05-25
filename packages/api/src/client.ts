@@ -400,6 +400,7 @@ function isStreamEvent(value: unknown): value is StreamEvent {
     type === 'now-playing' ||
     type === 'chat-token' ||
     type === 'tts-ready' ||
+    type === 'track-commentary' ||
     type === 'queue-update'
   );
 }

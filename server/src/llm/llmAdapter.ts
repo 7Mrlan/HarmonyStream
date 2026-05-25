@@ -7,7 +7,7 @@
 
 import type { ChatResponse, NowResponse, Track } from '@claudio/api';
 import { env } from '../env.js';
-import { buildDjPrompt, buildMusicIntentPrompt } from './prompt.js';
+import { buildDjPrompt, buildMusicIntentPrompt, buildTrackCommentaryPrompt } from './prompt.js';
 
 interface ProviderConfig {
   id: string;
@@ -48,6 +48,15 @@ export interface GenerateMusicIntentInput {
   currentTrack: Track | null;
 }
 
+export interface GenerateTrackCommentaryInput {
+  userText: string;
+  modelId: string;
+  modelDisplayName: string;
+  currentTrack: Track | null;
+  selectedTrack: Track;
+  cause: 'next' | 'previous';
+}
+
 export type GenerateDjResponseResult =
   | {
       ok: true;
@@ -77,6 +86,8 @@ export type GenerateMusicIntentResult =
       providerId: string;
       elapsedMs: number;
     };
+
+export type GenerateTrackCommentaryResult = GenerateDjResponseResult;
 
 interface OpenAiChatCompletionResponse {
   choices?: Array<{
@@ -468,6 +479,78 @@ function normalizeMusicIntent(value: unknown, userText: string): MusicIntent | n
     ...(mood ? { mood } : {}),
     ...(note ? { note } : {}),
   };
+}
+
+/*
+ * 为主动切歌生成短播报。
+ * 这是附加体验，失败时调用方必须回退 djCopy 模板，不能阻塞播放链路。
+ */
+export async function generateTrackCommentary(
+  input: GenerateTrackCommentaryInput,
+): Promise<GenerateTrackCommentaryResult> {
+  const startedAt = Date.now();
+  const provider = getProviderConfig(input.modelId, input.modelDisplayName);
+
+  if (!provider.apiKey) {
+    return buildFailure(provider, startedAt, 'provider key 未配置');
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), env.LLM_TIMEOUT_MS);
+
+  try {
+    const requestBody: Record<string, unknown> = {
+      model: provider.model,
+      messages: buildTrackCommentaryPrompt(input),
+      temperature: 0.72,
+      max_tokens: 160,
+    };
+
+    if (provider.jsonMode) {
+      requestBody.response_format = { type: 'json_object' };
+    }
+
+    if (provider.thinkingType) {
+      requestBody.thinking = { type: provider.thinkingType };
+    }
+
+    const response = await fetch(buildChatCompletionsUrl(provider.baseUrl), {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${provider.apiKey}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      return buildFailure(provider, startedAt, `provider HTTP ${response.status}`);
+    }
+
+    const content = readCompletionContent((await response.json()) as unknown);
+    if (!content) {
+      return buildFailure(provider, startedAt, 'provider 响应缺少 content');
+    }
+
+    const parsed = parseChatResponseJson(content, input.selectedTrack, [input.selectedTrack]);
+    if (!parsed) {
+      return buildFailure(provider, startedAt, 'provider 输出无法解析为短播报');
+    }
+
+    return {
+      ok: true,
+      response: parsed,
+      providerId: provider.id,
+      model: provider.model,
+      elapsedMs: Date.now() - startedAt,
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : 'provider 请求异常';
+    return buildFailure(provider, startedAt, reason);
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 /*

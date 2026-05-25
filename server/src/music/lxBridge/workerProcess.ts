@@ -8,7 +8,9 @@ import { fork, type ChildProcess } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type {
+  LxMusicCandidate,
   LxResolvedUrl,
+  LxSearchMusicRequest,
   LxSourceInitResult,
   LxWorkerClient,
   LxWorkerProcessOptions,
@@ -29,6 +31,14 @@ export function createLxWorkerProcess(options: LxWorkerProcessOptions): LxWorker
           action: 'load-source',
           payload: { script, requestTimeoutMs: options.requestTimeoutMs },
         },
+        options.timeoutMs,
+      );
+    },
+    searchMusic: async (request: LxSearchMusicRequest) => {
+      if (!child) throw new Error('LX worker 尚未加载源脚本');
+      return requestWorker<LxMusicCandidate[]>(
+        child,
+        { id: createRequestId(), action: 'search-music', payload: request },
         options.timeoutMs,
       );
     },

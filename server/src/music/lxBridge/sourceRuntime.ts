@@ -36,6 +36,12 @@ export function createLxSourceRuntime(config: LxSourceRuntimeConfig): LxBridgeRu
     loadActiveSource: async () => {
       return ensureActiveSource();
     },
+    searchMusicCandidates: async (source, keyword, limit) => {
+      const initResult = await ensureActiveSource();
+      if (!initResult.sources[source]?.actions.includes('musicSearch')) return [];
+      if (!active) throw new Error('LX runtime active 状态丢失');
+      return active.client.searchMusic({ source, keyword, limit });
+    },
     resolveMusicUrl: async (candidate, quality) => {
       const initResult = await ensureActiveSource();
       if (!initResult.sources[candidate.source]) return null;

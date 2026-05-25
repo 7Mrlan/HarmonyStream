@@ -21,6 +21,7 @@ import {
   getModels,
   getNextTrack,
   getNowPlaying,
+  getPlaybackCapabilities,
   handleChat,
   playNextTrack,
   playPreviousTrack,
@@ -106,6 +107,7 @@ export function registerApiRoutes(app: FastifyInstance): void {
     broadcastStreamEvent({
       type: 'queue-update',
       queue: result.queue,
+      playback: getPlaybackCapabilities(),
     });
     if (result.currentTrack) {
       broadcastNowPlaying(result.currentTrack);
@@ -126,6 +128,7 @@ function broadcastPlaybackMove(result: PlaybackMoveResponse): void {
   broadcastStreamEvent({
     type: 'queue-update',
     queue: result.queue,
+    playback: result.playback,
   });
 }
 

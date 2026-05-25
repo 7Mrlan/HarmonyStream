@@ -28,6 +28,10 @@ export interface PlayerControlsProps {
   ended?: boolean;
   /* 是否已收藏（FAV） */
   faved?: boolean;
+  /* 上一首是否不可用，由服务端队列能力决定。 */
+  prevDisabled?: boolean;
+  /* 下一首是否不可用，由服务端队列能力决定。 */
+  nextDisabled?: boolean;
   /* 各按钮回调，外部按需注入 */
   onPrev?: () => void;
   onPlayPause?: () => void;
@@ -47,6 +51,7 @@ interface GlassButtonProps {
   icon?: 'prev' | 'play' | 'pause' | 'next';
   onPress?: () => void;
   onFeedback?: () => void;
+  disabled?: boolean;
   /* 用于主播放按钮与收藏按钮的激活态 */
   active?: boolean;
   /* 主播放按钮更大但按系统控制栏收敛尺寸 */
@@ -91,7 +96,7 @@ function ControlIcon({ icon, primary }: { icon: NonNullable<GlassButtonProps['ic
 }
 
 /* 子组件：霓虹玻璃按钮，统一处理 hover、press、涟漪和主按钮呼吸 */
-function GlassButton({ label, icon, onPress, onFeedback, active, primary }: GlassButtonProps) {
+function GlassButton({ label, icon, onPress, onFeedback, active, primary, disabled }: GlassButtonProps) {
   const [hovered, setHovered] = useState(false);
   const ripple = useSharedValue(0);
   const breathe = useSharedValue(0);
@@ -127,12 +132,13 @@ function GlassButton({ label, icon, onPress, onFeedback, active, primary }: Glas
   }, [active, breathe, primary]);
 
   function handlePress() {
-    if (!onPress) return;
+    if (!onPress || disabled) return;
     onFeedback?.();
     onPress();
   }
 
   function handlePressIn() {
+    if (disabled) return;
     cancelAnimation(ripple);
     cancelAnimation(pressProgress);
     ripple.value = 0;
@@ -141,16 +147,19 @@ function GlassButton({ label, icon, onPress, onFeedback, active, primary }: Glas
   }
 
   function handlePressOut() {
+    if (disabled) return;
     cancelAnimation(pressProgress);
     pressProgress.value = withTiming(0, { duration: 80, easing: Easing.out(Easing.quad) });
   }
 
   function handleHoverIn() {
+    if (disabled) return;
     setHovered(true);
     hoverProgress.value = withTiming(1, { duration: 100, easing: Easing.out(Easing.quad) });
   }
 
   function handleHoverOut() {
+    if (disabled) return;
     setHovered(false);
     hoverProgress.value = withTiming(0, { duration: 130, easing: Easing.out(Easing.quad) });
   }
@@ -239,7 +248,7 @@ function GlassButton({ label, icon, onPress, onFeedback, active, primary }: Glas
             alignItems: 'center',
             justifyContent: 'center',
             backgroundColor: active ? 'rgba(0,255,136,0.12)' : 'transparent',
-            opacity: onPress ? 1 : 0.45,
+            opacity: onPress && !disabled ? 1 : 0.32,
             shadowColor: '#00ff88',
             shadowOpacity: active || hovered ? 0.34 : 0.08,
             shadowRadius: active || hovered ? 18 : 4,
@@ -271,6 +280,8 @@ function GlassButton({ label, icon, onPress, onFeedback, active, primary }: Glas
 export function PlayerControls({
   playing = false,
   faved = false,
+  prevDisabled = false,
+  nextDisabled = false,
   onPrev,
   onPlayPause,
   onNext,
@@ -297,7 +308,12 @@ export function PlayerControls({
         shadowRadius: 24,
       }}
     >
-      <GlassButton icon="prev" onPress={onPrev} onFeedback={() => onActionFeedback?.('prev')} />
+      <GlassButton
+        icon="prev"
+        onPress={onPrev}
+        onFeedback={() => onActionFeedback?.('prev')}
+        disabled={prevDisabled}
+      />
       <GlassButton
         icon={playing ? 'pause' : 'play'}
         onPress={onPlayPause}
@@ -305,7 +321,12 @@ export function PlayerControls({
         active={playing}
         primary
       />
-      <GlassButton icon="next" onPress={onNext} onFeedback={() => onActionFeedback?.('next')} />
+      <GlassButton
+        icon="next"
+        onPress={onNext}
+        onFeedback={() => onActionFeedback?.('next')}
+        disabled={nextDisabled}
+      />
       <GlassButton label="□" onPress={onStop} onFeedback={() => onActionFeedback?.('stop')} />
       <GlassButton label="LIKE" onPress={onLike} onFeedback={() => onActionFeedback?.('like')} />
       <GlassButton label="HIDE" onPress={onHide} onFeedback={() => onActionFeedback?.('hide')} />

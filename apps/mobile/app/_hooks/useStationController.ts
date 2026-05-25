@@ -5,7 +5,7 @@
  * 上一首 / 下一首以服务端队列为权威，避免歌曲、主播、队列各自为政。
  */
 
-import type { ClaudioApiClient, Track } from '@claudio/api';
+import type { ClaudioApiClient, PlaybackCapabilities, Track } from '@claudio/api';
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import type { RadioPlayerActions, RadioPlayerState } from './useRadioPlayer';
 import type { TtsPlayerActions, TtsPlayerState } from './useTtsPlayer';
@@ -30,6 +30,8 @@ export interface StationControllerInput {
   setStationPaused: Dispatch<SetStateAction<boolean>>;
   /* 用服务端返回的队列替换本地播放队列。 */
   applyApiTracks: (tracks: Array<Track | null | undefined>, allowEmpty?: boolean) => void;
+  /* 同步服务端播放控制能力。 */
+  setPlaybackCapabilities?: (playback: PlaybackCapabilities) => void;
 }
 
 export interface StationController {
@@ -68,6 +70,7 @@ export function useStationController(input: StationControllerInput): StationCont
     radio,
     setStationPaused,
     setVoiceEnabled,
+    setPlaybackCapabilities,
     stationPaused,
     voice,
     voiceEnabled,
@@ -200,6 +203,7 @@ export function useStationController(input: StationControllerInput): StationCont
         if (result.ok) {
           voice.stop();
           applyApiTracks(result.queue, true);
+          if (result.playback) setPlaybackCapabilities?.(result.playback);
           if (shouldStayPaused) pauseAfterQueueSwap();
         }
         return;
@@ -212,7 +216,7 @@ export function useStationController(input: StationControllerInput): StationCont
       else radio.prev();
       if (shouldStayPaused) pauseAfterQueueSwap();
     },
-    [apiClient, applyApiTracks, pauseAfterQueueSwap, setStationPaused],
+    [apiClient, applyApiTracks, pauseAfterQueueSwap, setPlaybackCapabilities, setStationPaused],
   );
 
   const nextTrack = useCallback(() => {

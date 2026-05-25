@@ -32,6 +32,19 @@ export interface Track {
   expiresAt?: string;
 }
 
+export interface PlaybackCapabilities {
+  /* 服务端队列中当前曲目前面是否还有可回退曲目。 */
+  canPrevious: boolean;
+  /* 服务端队列中当前曲目后面是否已有可立即播放曲目。 */
+  canNext: boolean;
+  /* 服务端完整内存队列长度，不等同于客户端可见队列切片长度。 */
+  queueSize: number;
+  /* 服务端当前曲目在完整内存队列里的索引。 */
+  currentIndex: number;
+  /* 当前 session 是否允许后台续推补歌。 */
+  canAutoRefill: boolean;
+}
+
 /* ========== POST /api/chat ========== */
 
 export interface ChatRequest {
@@ -52,6 +65,7 @@ export interface NowResponse {
   track: Track | null;
   position: number; // 当前播放位置（秒）
   state: 'playing' | 'paused' | 'idle';
+  playback?: PlaybackCapabilities;
 }
 
 /* ========== GET /api/next ========== */
@@ -70,12 +84,14 @@ export type PlaybackMoveResponse =
       ok: true;
       track: Track;
       queue: Track[];
+      playback?: PlaybackCapabilities;
     }
   | {
       ok: false;
       reason: string;
       track: Track | null;
       queue: Track[];
+      playback?: PlaybackCapabilities;
     };
 
 export interface TasteResponse {
@@ -123,5 +139,6 @@ export interface SwitchModelResponse {
 export type StreamEvent =
   | { type: 'now-playing'; track: Track; position: number }
   | { type: 'chat-token'; text: string; final: boolean }
-  | { type: 'tts-ready'; url: string }
-  | { type: 'queue-update'; queue: Track[] };
+  | { type: 'tts-ready'; url: string; trackId?: string }
+  | { type: 'track-commentary'; trackId: string; say: string; segue?: string; reason?: string }
+  | { type: 'queue-update'; queue: Track[]; playback?: PlaybackCapabilities };

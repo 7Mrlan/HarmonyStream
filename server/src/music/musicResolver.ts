@@ -55,6 +55,10 @@ export async function resolveTracksForChat({
   limit = 3,
   allowFallback = false,
 }: ResolveTracksForChatInput): Promise<ResolvedMusicPlan> {
+  if (preferredTitles && preferredTitles.length > 1 && limit > 1) {
+    return resolvePreferredTitleBatch({ userText, preferredTitles, limit, allowFallback });
+  }
+
   const chain = getProviderChain();
   const reasons: string[] = [];
 
@@ -116,6 +120,57 @@ export async function resolveTracksForChat({
     providerId: 'fallback',
     reason: reasons.length > 0 ? reasons.join('；') : 'provider chain 为空，使用静态 fallback',
   };
+}
+
+/*
+ * 多首推荐时逐个 preferred title 解析。
+ * 这样能避免音乐源围绕单个关键词返回多个版本，保证情绪 / 歌单请求更像真实队列。
+ */
+async function resolvePreferredTitleBatch({
+  userText,
+  preferredTitles,
+  limit,
+  allowFallback,
+}: Required<Pick<ResolveTracksForChatInput, 'userText' | 'limit' | 'allowFallback'>> & {
+  preferredTitles: string[];
+}): Promise<ResolvedMusicPlan> {
+  const collected: Track[] = [];
+  const reasons: string[] = [];
+
+  for (const title of preferredTitles) {
+    if (collected.length >= limit) break;
+    const plan = await resolveTracksForChat({
+      userText: title,
+      preferredTitles: [title],
+      limit: 1,
+      allowFallback,
+    });
+    reasons.push(`${title}: ${plan.reason}`);
+
+    for (const track of plan.tracks) {
+      if (collected.length >= limit) break;
+      if (collected.some((item) => getTrackKey(item) === getTrackKey(track) || isSameTitle(item.title, track.title))) {
+        continue;
+      }
+      collected.push(cloneTrack(track));
+    }
+  }
+
+  if (collected.length > 0) {
+    return {
+      tracks: collected,
+      usedFallback: false,
+      providerId: collected[0]?.source?.provider ?? 'mixed',
+      reason: `preferred title batch 返回 ${collected.length} 首；${reasons.join('；')}`,
+    };
+  }
+
+  return resolveTracksForChat({
+    userText,
+    preferredTitles: preferredTitles.slice(0, 1),
+    limit,
+    allowFallback,
+  });
 }
 
 /* 缓存读取。 */
@@ -191,6 +246,11 @@ function dedupePlayableTracks(tracks: Track[]): Track[] {
   }
 
   return result;
+}
+
+/* provider 结果去重 key，优先 id，缺失时用 URL。 */
+function getTrackKey(track: Track): string {
+  return track.id || track.url;
 }
 
 /*

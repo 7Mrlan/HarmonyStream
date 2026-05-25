@@ -136,8 +136,8 @@ async function searchCandidatesViaKuwo(
 
   for (const query of queries) {
     if (candidates.length >= Math.max(input.limit * 3, 6)) break;
-    const raw = await fetchKuwoSearch(query, Math.max(input.limit * 3, 6), timeoutMs);
-    for (const candidate of parseKuwoCandidates(raw)) {
+    const parsed = await fetchKuwoCandidates(query, Math.max(input.limit * 3, 6), timeoutMs);
+    for (const candidate of parsed) {
       if (seenIds.has(candidate.id)) continue;
       seenIds.add(candidate.id);
       candidates.push(candidate);
@@ -156,6 +156,21 @@ function buildKuwoQueries(input: MusicSearchInput): string[] {
     .map((query) => query.trim())
     .filter((query) => query.length > 0);
   return [...new Set(queries)].slice(0, 4);
+}
+
+/* 调用 Kuwo 候选接口，并在旧搜索端点被拦截时切到溯音 Kuwo 直链接口。 */
+async function fetchKuwoCandidates(
+  query: string,
+  limit: number,
+  timeoutMs: number,
+): Promise<LxMusicCandidate[]> {
+  try {
+    return parseKuwoCandidates(await fetchKuwoSearch(query, limit, timeoutMs));
+  } catch (error) {
+    const fallback = await fetchSuyinKuwoDirectCandidate(query, timeoutMs);
+    if (fallback) return [fallback];
+    throw error;
+  }
 }
 
 /* 调用 Kuwo 搜索接口并解析 JSON。 */
@@ -197,7 +212,40 @@ async function fetchKuwoSearch(
       signal: controller.signal,
     });
     if (!response.ok) throw new Error(`Kuwo search HTTP ${response.status}`);
-    return parseKuwoJson(await response.text());
+    const text = await response.text();
+    if (looksLikeHtml(text)) throw new Error('Kuwo search 返回 HTML，疑似被网络策略拦截');
+    return parseKuwoJson(text);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/* 调用实测可用的溯音 Kuwo 接口；它直接返回播放 URL，可作为候选直链。 */
+async function fetchSuyinKuwoDirectCandidate(
+  query: string,
+  timeoutMs: number,
+): Promise<LxMusicCandidate | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const url =
+    'https://oiapi.net/api/Kuwo?' +
+    new URLSearchParams({
+      msg: query,
+      n: '1',
+      br: '1',
+    }).toString();
+
+  try {
+    const response = await fetch(url, {
+      headers: {
+        accept: 'application/json,text/plain,*/*',
+        referer: 'https://oiapi.net/',
+      },
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`Suyin Kuwo HTTP ${response.status}`);
+    const payload = await response.json() as unknown;
+    return parseSuyinKuwoCandidate(payload, query);
   } finally {
     clearTimeout(timeout);
   }
@@ -217,6 +265,11 @@ function parseKuwoJson(text: string): unknown {
   }
 }
 
+/* 识别网关拦截页，避免从 HTML 里的 JavaScript 对象片段硬切 JSON。 */
+function looksLikeHtml(text: string): boolean {
+  return /^\s*<!doctype html/i.test(text) || /^\s*<html/i.test(text);
+}
+
 /* 把 Kuwo 搜索响应映射成 LX musicInfo 候选。 */
 function parseKuwoCandidates(payload: unknown): LxMusicCandidate[] {
   if (!isRecord(payload) || !Array.isArray(payload.abslist)) return [];
@@ -227,6 +280,79 @@ function parseKuwoCandidates(payload: unknown): LxMusicCandidate[] {
     if (candidate) candidates.push(candidate);
   }
   return candidates;
+}
+
+/* 解析溯音 Kuwo 返回的直链响应。 */
+function parseSuyinKuwoCandidate(payload: unknown, query: string): LxMusicCandidate | null {
+  if (!isRecord(payload)) return null;
+  const directUrl = readSuyinDirectUrl(payload);
+  if (!directUrl) return null;
+
+  const message = readString(payload.message);
+  const parsed = parseSuyinMessage(message);
+  const title = parsed.title || readString(payload.name) || query;
+  const artist = parsed.artist || readString(payload.artist);
+  const artwork = parsed.artwork || readString(payload.pic) || readString(payload.img);
+  const id = createSuyinCandidateId(title, artist, directUrl);
+
+  return {
+    id,
+    source: 'kw',
+    title,
+    ...(artist ? { artist } : {}),
+    ...(artwork ? { artwork } : {}),
+    quality: inferQualityFromUrl(directUrl),
+    musicInfo: {
+      name: title,
+      ...(artist ? { singer: artist } : {}),
+      source: 'kw',
+      songmid: id,
+      claudioDirectUrl: directUrl,
+    },
+  };
+}
+
+/* 从溯音响应中读取播放直链。 */
+function readSuyinDirectUrl(payload: Record<string, unknown>): string {
+  const data = payload.data;
+  if (isRecord(data)) {
+    const nestedUrl = readString(data.url);
+    if (nestedUrl) return nestedUrl;
+  }
+  const message = readString(payload.message);
+  const matched = message.match(/音乐链接[：:](\S+)/u);
+  return matched?.[1]?.trim() ?? '';
+}
+
+/* 从溯音 message 文本中提取标题、歌手和封面。 */
+function parseSuyinMessage(message: string): { title: string; artist: string; artwork: string } {
+  return {
+    title: matchMessageLine(message, /歌名[：:]\s*([^\n]+)/u),
+    artist: matchMessageLine(message, /歌手[：:]\s*([^\n]+)/u),
+    artwork: matchMessageLine(message, /[±\s]*img=(\S+)/u),
+  };
+}
+
+/* 读取 message 中的一行字段。 */
+function matchMessageLine(message: string, pattern: RegExp): string {
+  return message.match(pattern)?.[1]?.trim() ?? '';
+}
+
+/* 根据 URL 粗略推断音质，用于 UI 展示。 */
+function inferQualityFromUrl(url: string): string {
+  const lower = url.toLowerCase();
+  if (lower.includes('flac') || lower.includes('format$flac')) return 'flac';
+  if (lower.includes('320')) return '320k';
+  return '128k';
+}
+
+/* 为直链候选生成稳定 id。 */
+function createSuyinCandidateId(title: string, artist: string, url: string): string {
+  const stable = `${title}-${artist}-${url.slice(0, 48)}`
+    .toLowerCase()
+    .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return `suyin-${stable || Date.now()}`;
 }
 
 /* 解析单条 Kuwo 候选。 */

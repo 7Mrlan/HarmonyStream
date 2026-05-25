@@ -5,13 +5,15 @@
  */
 
 import type {
+  LxMusicCandidate,
   LxResolveMusicUrlRequest,
   LxResolvedUrl,
+  LxSearchMusicRequest,
   LxSourceInitResult,
   LxSourceScript,
 } from './types.js';
 
-export type LxWorkerAction = 'load-source' | 'resolve-music-url' | 'destroy';
+export type LxWorkerAction = 'load-source' | 'search-music' | 'resolve-music-url' | 'destroy';
 
 export interface LxWorkerMessage<TPayload = unknown> {
   /* IPC 请求 id。 */
@@ -52,6 +54,8 @@ export type LxWorkerResponseMessage<TPayload = unknown> =
   | LxWorkerErrorMessage;
 
 export type LxLoadSourceMessage = LxWorkerMessage<LxLoadSourcePayload>;
+export type LxSearchMusicMessage = LxWorkerMessage<LxSearchMusicRequest>;
 export type LxResolveMusicUrlMessage = LxWorkerMessage<LxResolveMusicUrlRequest>;
 export type LxLoadSourceResponse = LxWorkerResponseMessage<LxSourceInitResult>;
+export type LxSearchMusicResponse = LxWorkerResponseMessage<LxMusicCandidate[]>;
 export type LxResolveMusicUrlResponse = LxWorkerResponseMessage<LxResolvedUrl | null>;

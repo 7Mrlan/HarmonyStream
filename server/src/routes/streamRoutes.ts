@@ -6,7 +6,7 @@
  */
 
 import type { FastifyInstance } from 'fastify';
-import { getNowPlaying, getQueueSnapshot } from '../state/radioState.js';
+import { getNowPlaying, getPlaybackCapabilities, getQueueSnapshot } from '../state/radioState.js';
 import { registerStreamClient, sendStreamEvent } from '../realtime/streamHub.js';
 
 /*
@@ -18,7 +18,7 @@ export function registerStreamRoutes(app: FastifyInstance): void {
     registerStreamClient(socket);
 
     const queue = getQueueSnapshot();
-    sendStreamEvent(socket, { type: 'queue-update', queue });
+    sendStreamEvent(socket, { type: 'queue-update', queue, playback: getPlaybackCapabilities() });
 
     const now = getNowPlaying();
     if (now.track) {

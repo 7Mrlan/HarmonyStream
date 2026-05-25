@@ -57,6 +57,8 @@ export interface LxCandidateSearchConfig {
 export interface LxBridgeRuntime {
   /* 加载当前启用源；源未变化时复用已有 worker context。 */
   loadActiveSource(): Promise<LxSourceInitResult>;
+  /* 调用用户源声明的 musicSearch，产出同源 musicUrl 可消费的候选。 */
+  searchMusicCandidates(source: string, keyword: string, limit: number): Promise<LxMusicCandidate[]>;
   /* 把候选 musicInfo 交给用户源解析播放 URL。 */
   resolveMusicUrl(candidate: LxMusicCandidate, quality?: string): Promise<LxResolvedUrl | null>;
   /* 销毁当前 worker。 */
@@ -114,9 +116,20 @@ export interface LxResolveMusicUrlRequest {
   quality?: string;
 }
 
+export interface LxSearchMusicRequest {
+  /* LX 源 key，例如 qsvip。 */
+  source: string;
+  /* 搜索关键词。 */
+  keyword: string;
+  /* 最大候选数量。 */
+  limit: number;
+}
+
 export interface LxWorkerClient {
   /* 在隔离进程内加载源脚本。 */
   loadSource(script: LxSourceScript): Promise<LxSourceInitResult>;
+  /* 在隔离进程内请求 musicSearch。 */
+  searchMusic(request: LxSearchMusicRequest): Promise<LxMusicCandidate[]>;
   /* 在隔离进程内请求 musicUrl。 */
   resolveMusicUrl(request: LxResolveMusicUrlRequest): Promise<LxResolvedUrl | null>;
   /* 销毁隔离进程。 */

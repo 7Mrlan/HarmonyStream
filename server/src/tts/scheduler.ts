@@ -33,6 +33,22 @@ export function scheduleTts(text: string, chatId: number, voice?: string): void 
 }
 
 /*
+ * 调度一次绑定曲目的 TTS 合成。
+ * 切歌短播报不能复用 chatId；调用方提供 stale checker，合成完成前后都校验当前曲是否仍匹配。
+ */
+export function scheduleTrackTts(
+  text: string,
+  trackId: string,
+  isStillCurrent: () => boolean,
+  voice?: string,
+): void {
+  const trimmed = text.trim();
+  if (!trimmed || !trackId) return;
+
+  void runTrackSynthesis(trimmed, trackId, isStillCurrent, voice);
+}
+
+/*
  * 真正的合成 + 广播。
  * 任意失败 / chatId 过期都会静默吞掉，不影响主链路。
  * 失败原因仅打到 console，便于排障；不发任何错误事件。
@@ -50,6 +66,32 @@ async function runSynthesis(text: string, chatId: number, voice?: string): Promi
     broadcastStreamEvent({ type: 'tts-ready', url });
   } catch (error) {
     console.warn('[tts] runSynthesis error:', error instanceof Error ? error.message : error);
+  }
+}
+
+/*
+ * 绑定曲目的合成 + 广播。
+ * 任何过期、失败或 provider 异常都静默吞掉，避免切歌播报影响播放主链路。
+ */
+async function runTrackSynthesis(
+  text: string,
+  trackId: string,
+  isStillCurrent: () => boolean,
+  voice?: string,
+): Promise<void> {
+  try {
+    if (!isStillCurrent()) return;
+    const result = await synthesizeForChat({ text, voice });
+    if (!result) {
+      console.warn('[tts] synthesizeForChat returned null for track commentary');
+      return;
+    }
+    if (!isStillCurrent()) return;
+
+    const url = buildTtsUrl(result.id);
+    broadcastStreamEvent({ type: 'tts-ready', url, trackId });
+  } catch (error) {
+    console.warn('[tts] runTrackSynthesis error:', error instanceof Error ? error.message : error);
   }
 }
 

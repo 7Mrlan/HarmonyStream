@@ -16,6 +16,7 @@ export function mapApiTrackToRadioTrack(track: Track | null | undefined): RadioT
   if (!track?.url) return null;
 
   return {
+    id: track.id,
     url: track.url,
     title: track.title,
     artist: track.artist,

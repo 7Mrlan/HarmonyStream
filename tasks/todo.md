@@ -33,6 +33,8 @@
 - [x] Phase G.2-pre：评论区驱动真实音乐闭环
 - [x] Phase G.2-default：默认真实音乐源
 - [x] Phase H：电台播放控制语义重整
+- [x] Phase I：默认 LX 双源池 + FLAC 优先
+- [x] Phase J：队列与推荐体验收口
 - [ ] Phase F：后台播放、锁屏控制、APK release、长时运行等产品化任务
 
 ---
@@ -51,6 +53,8 @@
 | radioState God Object 拆分 | 完成 | 新增 `server/src/radio/intentParser.ts`、`server/src/radio/djCopy.ts`，`radioState.ts` 保留状态与编排，对外 API 不变。 |
 | 播放控制回归修复 | 完成 | 恢复播放按钮可用、TTS 暂停/续播和 VOICE OFF 过期 TTS 防护；后续 Phase H 重新梳理完整控制语义。 |
 | Phase H | 完成 | 主播放按钮统一为电台总控，VOICE 只管主播自动播报，上一首 / 下一首走服务端 queue currentIndex。 |
+| Phase I | 完成 | 默认真实源已改为 `server/assets/lx-sources` 内置双源池，`server/data/lx-sources` 只作本机私有覆盖，FLAC 优先链路已验证。 |
+| Phase J | 完成 | 单曲 / 情绪 / 多首请求队列语义、按钮禁用、后台续推、切歌短播报与 track-aware TTS 保护已通过验收。 |
 
 ---
 
@@ -63,23 +67,6 @@
 
 ---
 
-## 当前任务 · Phase I（默认 LX 双源池 + FLAC 优先）
+## 当前任务
 
-- [x] 本地基准：对比 `primary/primary.js` 与 `secondary/secondary.js` 的 worker 初始化、FLAC URL 解析、降级行为。
-- [x] 现状分析：写入 `tasks/spec.md` §14.1，明确当前单 LX provider / 单 runtime 边界。
-- [x] 功能点方案：设计默认双源池、源优先级、FLAC 优先级、失败降级与 env 覆盖策略。
-- [x] 风险与执行步骤：明确不提交 `server/data` 音源文件、沙箱隔离不降级、验证命令与 HTTP 烟测。
-- [x] HARD-GATE：用户确认完整 Phase I Spec 后开始编码。
-- [x] 服务端实现：接入两个本地 LX 源为默认源池，并保留用户 env 覆盖能力。
-- [x] 验证：`pnpm --filter server typecheck`、`pnpm lint`、HTTP 点歌返回 FLAC 来源 track。
-
-### Review
-
-- `pnpm --filter server typecheck` 通过；`pnpm --filter server build` 通过；`pnpm lint` 通过。
-- 生产入口烟测：`node dist/index.js` 可启动并响应 `/health`，ESM 相对 import 扩展问题已修复。
-- HTTP 烟测：默认点歌“我想听许嵩的乌鸦”命中 `lx-primary`，`quality=flac`，`state=playing`。
-- HTTP 烟测：临时禁用 `primary.js` 后同一首歌命中 `lx-secondary`，测试结束已恢复文件。
-- HTTP 烟测：临时配置 `LX_SOURCE_SCRIPT_FILE` 后命中兼容 provider `lx`，用户自定义单源覆盖未被破坏。
-- 追加修正：默认真实源改为提交到 `server/assets/lx-sources`，`server/data/lx-sources` 作为本机私有覆盖层保留。
-- 追加验证：临时隐藏 `server/data/lx-sources/primary|secondary` 后仍命中 assets 内置 `lx-primary`，证明开源拉取代码可开箱使用默认源。
-- 追加验证：`server/data/lx-sources` 恢复后仍命中 `lx-primary`；临时 `LX_SOURCE_SCRIPT_FILE` 仍命中兼容 provider `lx`。
+- [ ] 等待下一轮功能点确认。
