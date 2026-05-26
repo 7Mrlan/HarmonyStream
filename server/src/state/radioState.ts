@@ -9,42 +9,23 @@
 import type {
   ChatRequest,
   ChatResponse,
-  ModelInfo,
   NextResponse,
   NowResponse,
   PlaybackCapabilities,
   PlaybackMoveResponse,
   Track,
 } from '@claudio/api';
-import { generateDjResponse, generateMusicIntent, type GenerateMusicIntentResult } from '../llm/llmAdapter.js';
 import { cloneTrack } from '../music/fallbackCatalog.js';
-import { resolveTracksForChat } from '../music/musicResolver.js';
 import { cancelPendingPreloads, schedulePreload } from '../music/preload.js';
 import { broadcastStreamEvent } from '../realtime/streamHub.js';
+import { buildChatTimeoutResponse, planChatTurn } from '../radio/chatTurnPlanner.js';
 import {
-  buildFallbackChatResponse,
-  buildNoTrackChatResponse,
-  buildQuickSongChatResponse,
-} from '../radio/djCopy.js';
-import {
-  buildExplicitMusicIntent,
-  buildGenreMusicIntent,
-  parseExplicitSongRequest,
-  parseGenericRecommendationRequest,
-  parseGenreRecommendationRequest,
-  parseMusicRequestKind,
-} from '../radio/intentParser.js';
-import {
-  buildQueue,
-  chooseTrackFromPlay,
   getPlaybackCapabilitiesForState,
   getQueueFromIndex,
   getTrackKey,
 } from '../radio/playbackQueue.js';
 import {
-  buildSessionIntent,
   createSessionMemory,
-  getTargetQueueSize,
   markTrackSeen,
   maybeRefillQueue as maybeRefillSessionQueue,
   resetSessionMemory as resetRadioSessionMemory,
@@ -60,7 +41,6 @@ import { getCurrentModel } from './modelState.js';
 export { getModels, switchModel } from './modelState.js';
 
 type RadioPlaybackState = NowResponse['state'];
-type SuccessfulMusicIntent = Extract<GenerateMusicIntentResult, { ok: true }>;
 
 interface RadioState {
   currentTrack: Track | null;
@@ -169,7 +149,7 @@ async function runChatWithTimeout(request: ChatRequest): Promise<ChatResult> {
  * 保留当前播放状态，不清空曲目；只告诉用户这次外部音源解析超时，避免播放器突然掉歌。
  */
 function buildTimedOutChatResult(text: string): ChatResult {
-  const response = buildNoTrackChatResponse(text, '外部音乐源解析超时，请稍后重试或换一个关键词。');
+  const response = buildChatTimeoutResponse(text);
   radioState.messages = [...radioState.messages, response].slice(-20);
 
   return {
@@ -184,110 +164,55 @@ function buildTimedOutChatResult(text: string): ChatResult {
  * LLM、音乐解析和内存 radioState 更新必须保持同一轮请求内一致，避免并发请求互相覆盖。
  */
 async function handleChatInternal(request: ChatRequest): Promise<ChatResult> {
-  const text = request.text.trim();
-  const currentModel = getCurrentModel();
-  const explicitRequest = parseExplicitSongRequest(text);
-  const genreRequest = explicitRequest ? null : parseGenreRecommendationRequest(text);
-  const genericRecommendationRequest = explicitRequest || genreRequest ? null : parseGenericRecommendationRequest(text);
-  const requestKind = parseMusicRequestKind(text, explicitRequest, genreRequest);
-  const musicIntent = explicitRequest
-    ? buildExplicitMusicIntent(explicitRequest)
-    : genreRequest
-      ? buildGenreMusicIntent(genreRequest)
-      : await buildLlmFirstMusicIntent({
-          text,
-          genericRecommendationRequest,
-          currentModel,
-        });
-
-  const preferredTitles = musicIntent.ok ? musicIntent.intent.preferredTitles : [];
-  const searchText = musicIntent.ok ? musicIntent.intent.searchQuery : text;
-  const targetQueueSize = getTargetQueueSize(requestKind);
-  const musicPlan = await resolveTracksForChat({
-    userText: searchText || text,
-    preferredTitles,
-    limit: targetQueueSize,
+  const plan = await planChatTurn(request, {
+    currentModel: getCurrentModel(),
+    playbackState: radioState.playbackState,
+    currentTrack: radioState.currentTrack,
   });
-  const candidateTracks = musicPlan.tracks.map(cloneTrack);
-  const selectedTrack = candidateTracks[0] ?? null;
 
-  if (!selectedTrack) {
-    const response = buildNoTrackChatResponse(text, buildMusicReason(musicPlan.reason, musicIntent));
-    cancelPendingPreloads();
+  /* 队列翻篇或清空时取消旧预热任务，再由提交后的真实队列重新调度。 */
+  cancelPendingPreloads();
+
+  if (!plan.ok) {
     radioState.currentTrack = null;
     radioState.playbackState = 'idle';
     radioState.queue = [];
     radioState.currentIndex = 0;
     radioState.activeIntent = null;
     resetSessionMemory([]);
-    radioState.messages = [...radioState.messages, response].slice(-20);
+    radioState.messages = [...radioState.messages, plan.response].slice(-20);
 
     return {
-      response,
+      response: plan.response,
       currentTrack: null,
       queue: [],
     };
   }
 
-  const generated = explicitRequest
-    ? null
-    : await generateDjResponse({
-        userText: text,
-        modelId: currentModel.id,
-        modelDisplayName: currentModel.displayName,
-        playbackState: radioState.playbackState,
-        currentTrack: radioState.currentTrack,
-        selectedTrack,
-        candidateTracks,
-      });
-  const response = generated?.ok
-    ? generated.response
-    : explicitRequest
-      ? buildQuickSongChatResponse(text, selectedTrack, buildMusicReason(musicPlan.reason, musicIntent))
-      : buildFallbackChatResponse(
-          text,
-          selectedTrack,
-          currentModel.displayName,
-          generated?.reason,
-          buildMusicReason(musicPlan.reason, musicIntent),
-        );
-  const currentTrack = chooseTrackFromPlay(response.play, candidateTracks) ?? selectedTrack;
-  const queue = buildQueue(currentTrack, candidateTracks);
-
-  /* 队列翻篇时取消旧预热任务，再把新队列里的下一首加入预热。 */
-  cancelPendingPreloads();
-
-  radioState.currentTrack = currentTrack;
+  radioState.currentTrack = plan.currentTrack;
   radioState.playbackState = 'playing';
-  radioState.queue = queue;
+  radioState.queue = plan.queue;
   radioState.currentIndex = 0;
-  radioState.activeIntent = buildSessionIntent({
-    userText: text,
-    searchText: searchText || text,
-    preferredTitles,
-    requestKind,
-    targetQueueSize,
-    voiceEnabledAtChat: Boolean(request.voice),
-  });
-  resetSessionMemory(queue);
-  radioState.messages = [...radioState.messages, response].slice(-20);
+  radioState.activeIntent = plan.activeIntent;
+  resetSessionMemory(plan.queue);
+  radioState.messages = [...radioState.messages, plan.response].slice(-20);
 
   /* 不阻塞 /api/chat：仅触发调度，预热在后台串行执行。 */
-  if (queue[1]) schedulePreload(queue[1]);
+  if (plan.queue[1]) schedulePreload(plan.queue[1]);
   maybeRefillQueue('chat');
 
   /*
    * Phase E：voice=true 时异步触发 TTS 合成；HTTP 不等待。
    * chatId 单调递增，新一轮 chat 进来后旧 TTS 结果会被丢弃，避免广播过期音频。
    */
-  if (request.voice) {
+  if (plan.shouldScheduleTts) {
     const chatId = nextChatId();
-    scheduleTts(response.say, chatId);
+    scheduleTts(plan.response.say, chatId);
   }
 
   return {
-    response,
-    currentTrack,
+    response: plan.response,
+    currentTrack: plan.currentTrack,
     queue: radioState.queue.map((track) => ({ ...track })),
   };
 }
@@ -320,53 +245,6 @@ export function playPreviousTrack(): PlaybackMoveResponse {
   }
 
   return moveToQueueIndex(previousIndex, 'previous');
-}
-
-/*
- * 汇总音乐解析 reason。
- * 真实 LLM 意图失败不阻断电台，只作为内部 fallback 说明保留。
- */
-function buildMusicReason(
-  musicReason: string,
-  musicIntent: GenerateMusicIntentResult,
-): string {
-  if (musicIntent.ok) {
-    const titles = musicIntent.intent.preferredTitles.join(' / ') || '无明确歌名';
-    return `${musicReason}；意图：${musicIntent.intent.searchQuery}；候选：${titles}`;
-  }
-  return `${musicReason}；意图 fallback：${musicIntent.reason}`;
-}
-
-/*
- * 泛推荐采用 LLM-first。
- * 有模型时让主播结合上下文决定搜索线索；LLM 不可用时再使用本地默认锚点，保证开源低配置也能闭环。
- */
-async function buildLlmFirstMusicIntent({
-  text,
-  genericRecommendationRequest,
-  currentModel,
-}: {
-  text: string;
-  genericRecommendationRequest: ReturnType<typeof parseGenericRecommendationRequest>;
-  currentModel: ModelInfo;
-}): Promise<Awaited<ReturnType<typeof generateMusicIntent>>> {
-  const generated = await generateMusicIntent({
-    userText: text,
-    modelId: currentModel.id,
-    modelDisplayName: currentModel.displayName,
-    playbackState: radioState.playbackState,
-    currentTrack: radioState.currentTrack,
-  });
-  if (generated.ok || !genericRecommendationRequest) return generated;
-
-  const fallback = buildGenreMusicIntent(genericRecommendationRequest) as SuccessfulMusicIntent;
-  return {
-    ...fallback,
-    intent: {
-      ...fallback.intent,
-      note: `generic recommendation fallback after ${generated.reason}`,
-    },
-  };
 }
 
 /*

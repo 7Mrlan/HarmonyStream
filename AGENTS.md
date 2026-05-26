@@ -30,6 +30,21 @@
 - 三步走完仍未生效，再排查 Metro `watchFolders`、pnpm hoist、组件实际渲染链路。
 - 详细案例与历史踩坑见 `tasks/lessons.md`。
 
+# 自动化测试入口（高频）
+
+- 编码完成后优先使用固定自动化测试入口，不再临时手写 PowerShell 启停服务端或拼临时 smoke。
+- 快速稳定层：
+  - 终端命令：`pnpm test`
+  - 覆盖全仓 typecheck + server 纯函数单元测试，不依赖真实音源或网络。
+- 完整后端电台层：
+  - 终端命令：`pnpm test:full`
+  - 先跑 `pnpm test`，再跑 `server` 固定 `smoke:radio`。
+- 修改 `server/src/state/radioState.ts`、`server/src/radio/*`、`server/src/music/*` 中会影响 `/api/chat`、`/api/now`、队列提交、无曲目分支或音乐解析链路的逻辑时，必须跑 `pnpm test:full`。
+- 只改纯函数或测试用例时，至少跑 `pnpm test`。
+- `smoke:radio` 会自动 build、分配临时端口、使用合法 `LOG_LEVEL=fatal`、等待 `/health`、验证结构用例和强制无曲目分支，并清理临时服务端；禁止保留临时 debug/smoke 脚本。
+- 不把“具体歌曲一定搜到”当结构 smoke 标准；真实音源会受网络、源脚本和相近匹配影响。结构 smoke 只验证 `/api/chat` 与 `/api/now` 状态一致、成功/无曲目分支提交正确。
+- 详细测试说明与用例见 `tasks/testing.md`。
+
 # 代码规范
 
 - 代码要写清楚中文注释，所有函数和关键逻辑都必须有注释，注释永远使用多行注释 `/* */`

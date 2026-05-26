@@ -401,3 +401,15 @@
 **规则**：1. 普通推荐默认只围绕本轮用户输入和本轮候选曲，不能提上一首、切到、换到、承接。2. 只有用户明确说“接着上一首 / 类似这首 / 换个同风格”等指代当前播放时，主推荐才可引用当前曲。3. 切歌短播报才允许使用上一首上下文，并且必须与普通推荐使用独立 prompt。4. 可以讲高置信公开歌曲背景、创作趣事或歌手信息，但拿不准时只讲听感，不能编造硬事实或用“据说 / 好像”包装猜测。
 
 **关联文件**：`server/src/llm/prompt.ts`、`server/src/state/radioState.ts`、`server/src/radio/djCopy.ts`
+
+---
+
+## 2026-05-26 - 编码完成后优先走两层自动化测试入口
+
+**触发**：Phase J.2/J.3 验证时多次踩到重复问题：Windows 上 `Start-Process pnpm` 不是稳定 Win32 可执行文件；`LOG_LEVEL=silent` 被 env schema 拒绝；随机无结果关键词会被真实音源解析出相近歌曲；只跑结构 smoke 又无法覆盖纯函数回归。
+
+**根因**：每次临时写 PowerShell 启停服务端，环境细节和验收口径都靠记忆；真实音源搜索结果不稳定，不适合拿“某首歌一定命中 / 某个随机词一定无结果”作为结构重构的稳定标准；同时缺少秒级单元测试会导致小改动也依赖慢 smoke 才能发现问题。
+
+**规则**：1. 编码完成后默认优先运行固定入口 `pnpm test`，覆盖全仓 typecheck 和 server 纯函数单元测试，不手写临时验证脚本。2. 影响 `/api/chat`、`/api/now`、队列提交、无曲目分支或音乐解析链路时运行 `pnpm test:full`，它会先跑 `pnpm test`，再跑固定 `smoke:radio`。3. `smoke:radio` 只作为 `test:full` 的结构层：自动 build、找临时端口、使用合法 `LOG_LEVEL=fatal`、等待 `/health`、结束清理进程；不把真实音源中某首歌一定命中当验收标准。4. 新增测试必须进入稳定自动化入口，不能留下临时 debug/smoke 脚本；真实音源质量和真机体验另开专项测试，不混入结构 smoke。
+
+**关联文件**：`package.json`、`server/package.json`、`server/scripts/smoke-radio.ts`、`server/src/**/*.test.ts`、`tasks/testing.md`、`AGENTS.md`

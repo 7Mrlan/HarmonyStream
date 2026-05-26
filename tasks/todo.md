@@ -55,6 +55,8 @@
 | Phase H | 完成 | 主播放按钮统一为电台总控，VOICE 只管主播自动播报，上一首 / 下一首走服务端 queue currentIndex。 |
 | Phase I | 完成 | 默认真实源已改为 `server/assets/lx-sources` 内置双源池，`server/data/lx-sources` 只作本机私有覆盖，FLAC 优先链路已验证。 |
 | Phase J | 完成 | 单曲 / 情绪 / 多首请求队列语义、按钮禁用、后台续推、切歌短播报与 track-aware TTS 保护已通过验收。 |
+| Phase J.1 | 完成 | `radioState.ts` 第一轮拆分完成，模型、队列、session 续推、切歌播报已拆到独立模块；详见 `tasks/spec/phase-j1-radio-state-orchestration-split.md`。 |
+| Phase J.2 | 完成 | `chatTurnPlanner.ts` 抽离完成，`radioState.ts` 只保留状态提交和播放副作用；详见 `tasks/spec/phase-j2-chat-turn-planner.md`。 |
 
 ---
 
@@ -67,25 +69,42 @@
 
 ---
 
-## 当前任务 · Phase J.1（radioState 编排拆分）
+## 当前任务 · Phase J.2（chatTurnPlanner 抽离）
 
-- [x] 现状分析：定位 `server/src/state/radioState.ts` 的职责膨胀边界。
-- [x] 功能点方案：设计拆分后的模块边界、导出 API 和迁移顺序。
-- [x] 风险与决策：明确不改公开路由契约、不改变播放行为、不引入循环依赖。
+- [x] 现状分析：确认 `handleChatInternal` 中规划段和提交段的清晰边界。
+- [x] 功能点方案：新增 `chatTurnPlanner.ts`，使用判别联合 `ChatTurnPlan`，副作用保留在 `radioState.ts` 提交阶段。
+- [x] 风险与执行步骤：明确 context 字段、类型依赖、迁移顺序和验证命令。
 - [x] HARD-GATE：用户确认完整 Spec 后开始编码。
-- [x] 实现：抽出 `modelState.ts`。
-- [x] 实现：抽出 `playbackQueue.ts`。
-- [x] 实现：抽出 `radioSession.ts`。
-- [x] 实现：抽出 `trackCommentaryService.ts`。
-- [x] 实现：瘦身 `radioState.ts` 并保持 facade API 不变。
+- [x] 实现：抽出 `server/src/radio/chatTurnPlanner.ts`。
+- [x] 实现：瘦身 `server/src/state/radioState.ts` 的 chat planning 逻辑并保持 facade API 不变。
 - [x] 验证：typecheck / lint / server build / HTTP smoke。
 
 ### Review
 
-- `server/src/state/radioState.ts` 从 762 行降到 534 行，保留路由 facade 导出不变。
-- 新增 `server/src/state/modelState.ts`，隔离模型列表和当前模型选择。
-- 新增 `server/src/radio/playbackQueue.ts`，隔离队列纯函数和按钮能力计算；不依赖 session 类型。
-- 新增 `server/src/radio/radioSession.ts`，隔离 activeIntent、seen、refillInFlight 和后台续推；追加曲目采用“返回 tracks，由 radioState push”的方式 A。
-- 新增 `server/src/radio/trackCommentaryService.ts`，隔离切歌短播报缓存、token 和 track-aware TTS。
-- 验证通过：`pnpm typecheck`、`pnpm lint`、`pnpm --filter server build`。
-- HTTP smoke 通过：单曲点歌 `queueSize=1/canNext=false`，范围推荐 `queueSize=3/canNext=true`，多首推荐 `queueSize=5/canNext=true`，`POST /api/playback/next` 后 `currentIndex=1/canPrevious=true`。
+- `server/src/state/radioState.ts` 从 477 行降到 360 行，保留状态 facade、chat 串行、超时、提交和播放副作用。
+- 新增 `server/src/radio/chatTurnPlanner.ts`，集中处理输入解析、LLM 意图、音乐解析、DJ 文案、队列构造和 `RadioSessionIntent`。
+- `radioState.ts` 已不再直接 import `llmAdapter`、`musicResolver`、`intentParser`、`djCopy`。
+- 验证通过：`pnpm typecheck:server`、`pnpm lint`、`pnpm --filter server build`。
+- HTTP structural smoke 通过：每次 `/api/chat` 后 `/api/now` 状态与 `play` 分支一致；强制 `MUSIC_PROVIDER_CHAIN=fallback` 时无曲目分支返回 `play=[]`、`track=null`、`state=idle`。
+
+---
+
+## 当前任务 · Phase J.3（自动化测试入口）
+
+- [x] 现状分析：确认当前只有 typecheck/lint/smoke，没有统一 test/test:full。
+- [x] 功能点方案：两层命令，server 使用 Vitest，首批覆盖 playbackQueue、intentParser、cache、titleMatch。
+- [x] 风险与执行步骤：明确不强行 export 内部函数、安装 Vitest 会改 lockfile、验证命令。
+- [x] HARD-GATE：用户确认完整 Spec 后开始编码。
+- [x] 实现：安装 Vitest 并新增 `server/vitest.config.ts`。
+- [x] 实现：新增根 `test/test:full` 与 server `test` 脚本。
+- [x] 实现：新增首批四个单元测试文件。
+- [x] 更新：同步 `tasks/testing.md` 测试分层说明。
+- [x] 验证：`pnpm test` / `pnpm test:full` / `pnpm lint`。
+
+### Review
+
+- 新增 Vitest 测试入口：根 `pnpm test` 跑 typecheck + server 单元测试，根 `pnpm test:full` 追加 `smoke:radio`。
+- 新增 `server/vitest.config.ts` 和 4 个测试文件，共 15 个单元测试。
+- 测试覆盖 `playbackQueue`、`intentParser`、`cache`、`titleMatch` 的关键纯函数和回归点。
+- 单元测试发现并修复真实 bug：`我想听周杰伦的晴天` 曾被裸 `X的Y` 规则误解析成 artist=`我想听周杰伦`；现在先匹配带前缀点歌，再匹配裸 `周杰伦的晴天`。
+- 验证通过：`pnpm test`、`pnpm test:full`、`pnpm lint`。

@@ -113,21 +113,6 @@ export function parseExplicitSongRequest(text: string): ExplicitSongRequest | nu
   const normalized = text.trim();
   if (!normalized) return null;
 
-  const bareArtistTitleMatch = normalized.match(/^([^，。,.!?！？]{1,40})的([^，。,.!?！？]{1,60})$/u);
-  if (bareArtistTitleMatch) {
-    if (isRecommendationPhrase(bareArtistTitleMatch[2] ?? '')) return null;
-
-    const artist = trimSongPhrase(bareArtistTitleMatch[1] ?? '');
-    const title = trimSongPhrase(bareArtistTitleMatch[2] ?? '');
-    if (isLikelyBareArtistTitle(artist, title)) {
-      return {
-        title,
-        artist,
-        searchQuery: `${title} ${artist}`,
-      };
-    }
-  }
-
   const artistTitleMatch = normalized.match(
     /(?:我想听|想听|播放|放一首|来一首|点一首|听一下|听听|我要听)\s*([^，。,.!?！？]{1,40})的([^，。,.!?！？]{1,60})/u,
   );
@@ -141,6 +126,21 @@ export function parseExplicitSongRequest(text: string): ExplicitSongRequest | nu
         title,
         ...(artist ? { artist } : {}),
         searchQuery: [title, artist].filter(Boolean).join(' '),
+      };
+    }
+  }
+
+  const bareArtistTitleMatch = normalized.match(/^([^，。,.!?！？]{1,40})的([^，。,.!?！？]{1,60})$/u);
+  if (bareArtistTitleMatch) {
+    if (isRecommendationPhrase(bareArtistTitleMatch[2] ?? '')) return null;
+
+    const artist = trimSongPhrase(bareArtistTitleMatch[1] ?? '');
+    const title = trimSongPhrase(bareArtistTitleMatch[2] ?? '');
+    if (isLikelyBareArtistTitle(artist, title)) {
+      return {
+        title,
+        artist,
+        searchQuery: `${title} ${artist}`,
       };
     }
   }
