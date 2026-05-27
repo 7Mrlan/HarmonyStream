@@ -19,8 +19,6 @@ import Animated, {
 } from 'react-native-reanimated';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 
-export type PlayerControlAction = 'prev' | 'playPause' | 'next' | 'stop' | 'like' | 'hide' | 'fav' | 'volume';
-
 export interface PlayerControlsProps {
   /* 是否在播放，影响 PLAY/PAUSE 切换 */
   playing?: boolean;
@@ -41,7 +39,6 @@ export interface PlayerControlsProps {
   onHide?: () => void;
   onFav?: () => void;
   onVolume?: () => void;
-  onActionFeedback?: (action: PlayerControlAction) => void;
 }
 
 interface GlassButtonProps {
@@ -59,7 +56,13 @@ interface GlassButtonProps {
 }
 
 /* 子组件：按用户提供 path 绘制上一首 / 播放 / 暂停 / 下一首 SVG */
-function ControlIcon({ icon, primary }: { icon: NonNullable<GlassButtonProps['icon']>; primary?: boolean }) {
+function ControlIcon({
+  icon,
+  primary,
+}: {
+  icon: NonNullable<GlassButtonProps['icon']>;
+  primary?: boolean;
+}) {
   if (icon === 'prev') {
     return (
       <Svg width={32} height={32} viewBox="0 0 40 40">
@@ -96,7 +99,15 @@ function ControlIcon({ icon, primary }: { icon: NonNullable<GlassButtonProps['ic
 }
 
 /* 子组件：霓虹玻璃按钮，统一处理 hover、press、涟漪和主按钮呼吸 */
-function GlassButton({ label, icon, onPress, onFeedback, active, primary, disabled }: GlassButtonProps) {
+function GlassButton({
+  label,
+  icon,
+  onPress,
+  onFeedback,
+  active,
+  primary,
+  disabled,
+}: GlassButtonProps) {
   const [hovered, setHovered] = useState(false);
   const ripple = useSharedValue(0);
   const breathe = useSharedValue(0);
@@ -204,7 +215,14 @@ function GlassButton({ label, icon, onPress, onFeedback, active, primary, disabl
   });
 
   return (
-    <View style={{ width: buttonSize, height: buttonSize, alignItems: 'center', justifyContent: 'center' }}>
+    <View
+      style={{
+        width: buttonSize,
+        height: buttonSize,
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
       <Animated.View
         pointerEvents="none"
         style={[
@@ -290,7 +308,6 @@ export function PlayerControls({
   onHide,
   onFav,
   onVolume,
-  onActionFeedback,
 }: PlayerControlsProps) {
   return (
     <View
@@ -308,30 +325,19 @@ export function PlayerControls({
         shadowRadius: 24,
       }}
     >
-      <GlassButton
-        icon="prev"
-        onPress={onPrev}
-        onFeedback={() => onActionFeedback?.('prev')}
-        disabled={prevDisabled}
-      />
+      <GlassButton icon="prev" onPress={onPrev} disabled={prevDisabled} />
       <GlassButton
         icon={playing ? 'pause' : 'play'}
         onPress={onPlayPause}
-        onFeedback={() => onActionFeedback?.('playPause')}
         active={playing}
         primary
       />
-      <GlassButton
-        icon="next"
-        onPress={onNext}
-        onFeedback={() => onActionFeedback?.('next')}
-        disabled={nextDisabled}
-      />
-      <GlassButton label="□" onPress={onStop} onFeedback={() => onActionFeedback?.('stop')} />
-      <GlassButton label="LIKE" onPress={onLike} onFeedback={() => onActionFeedback?.('like')} />
-      <GlassButton label="HIDE" onPress={onHide} onFeedback={() => onActionFeedback?.('hide')} />
-      <GlassButton label="FAV" onPress={onFav} onFeedback={() => onActionFeedback?.('fav')} active={faved} />
-      <GlassButton label="VOL" onPress={onVolume} onFeedback={() => onActionFeedback?.('volume')} />
+      <GlassButton icon="next" onPress={onNext} disabled={nextDisabled} />
+      <GlassButton label="□" onPress={onStop} />
+      <GlassButton label="LIKE" onPress={onLike} />
+      <GlassButton label="HIDE" onPress={onHide} />
+      <GlassButton label="FAV" onPress={onFav} active={faved} />
+      <GlassButton label="VOL" onPress={onVolume} />
     </View>
   );
 }

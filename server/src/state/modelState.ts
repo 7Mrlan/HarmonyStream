@@ -12,17 +12,14 @@ const MODELS: ModelInfo[] = [
   {
     id: 'deepseek',
     displayName: 'DeepSeek',
-    petSprite: 'deepseek',
   },
   {
     id: 'qwen',
     displayName: '通义千问',
-    petSprite: 'qwen',
   },
   {
     id: 'glm',
     displayName: '智谱 GLM',
-    petSprite: 'glm',
   },
 ];
 
@@ -71,7 +68,6 @@ export function getCurrentModel(): ModelInfo {
     MODELS.find((item) => item.id === DEFAULT_MODEL_ID) ?? {
       id: DEFAULT_MODEL_ID,
       displayName: 'DeepSeek',
-      petSprite: 'deepseek',
     }
   );
 }

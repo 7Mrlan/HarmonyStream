@@ -8,7 +8,7 @@
 
 ## 当前活跃索引
 
-- 当前主线：AI 电台已完成“推荐队列体验清晰”、`radioState.ts` 编排拆分和自动化测试入口，下一轮从 Phase K / L / M / N 路线图中选择。
+- 当前主线：AI 电台已完成“推荐队列体验清晰”、`radioState.ts` 编排拆分、自动化测试入口与 Phase F 产品化任务；下一轮默认进入 Phase K（歌曲像素海报），除非明确插队 Phase L / M / N。
 - 已完成：Phase A 后端 API 骨架；Phase B 移动端接入；Phase C LLM 主播；Phase C+ 等待体验；Phase D 音乐来源；Phase D.5 性能地基；Phase E TTS 入声；Phase F.0 SDK 56 依赖升级；Phase F.A 音频会话/后台权限；Phase F.B WS 心跳/重连；Phase F.C 锁屏 metadata 代码接线；Phase F.D APK 构建入口；Phase F.E 服务端 graceful shutdown；Phase J 队列与推荐体验收口；Phase J.1 radioState 编排拆分；Phase J.2 chatTurnPlanner 抽离；Phase J.3 自动化测试入口。
 - 当前阶段：暂无活跃阶段，等待下一轮功能点确认。
 - 当前 HARD-GATE：下一轮中等及以上阶段必须重新分段 Spec（现状分析 → 功能点 → 风险与决策）并等待用户确认。
@@ -144,92 +144,21 @@
 | Phase J.1 | 完成 | `radioState.ts` 保留 facade，模型、队列纯函数、session 续推、切歌播报拆入独立模块；完整历史见 `tasks/spec/phase-j1-radio-state-orchestration-split.md`。 |
 | Phase J.2 | 完成 | chat planning 抽入 `chatTurnPlanner.ts`，`radioState.ts` 只保留状态提交与副作用；完整历史见 `tasks/spec/phase-j2-chat-turn-planner.md`。 |
 | Phase J.3 | 完成 | 新增 Vitest 单元测试与根 `test/test:full` 两层入口，修复明确点歌解析顺序 bug；完整历史见 `tasks/spec/phase-j3-automated-test-entry.md`。 |
+| Phase F | 完成 | SDK 56 后台播放、锁屏 metadata、APK 构建入口、WS 重连与 graceful shutdown 已落地；完整历史见 `tasks/spec/phase-f-productization.md`。 |
 | Phase F.0 | 完成 | Expo SDK 56 / React 19.2.6 / RN 0.85.3 / TypeScript 6.0.3 升级完成；NativeWind 类型 shim 和临时 override 已清理。 |
-| Phase F.5 | 待启动 | BYO-LLM：用户自配 API key / baseUrl / model / provider 参数；必须单独立 Spec，不并入 Phase F.D。 |
 
 ---
 
-## 9. Phase F 当前真源：SDK 56 后台播放 / 锁屏 / APK
+## 9. Phase F：后台播放 / 锁屏 / APK（已归档）
 
-### 9.1 当前决策
-
-- 当前基线：Expo SDK 56，`expo-audio@56.0.9` 已在本地源码确认支持 `setAudioModeAsync`、`AudioPlayer.setActiveForLockScreen`、`updateLockScreenMetadata`、`clearLockScreenControls`。
-- 锁屏方案：优先走 `expo-audio` 自带锁屏能力，不安装 `react-native-track-player`，避免双播放器宿主复杂度。
-- 音频会话：全局只配置一次 `setAudioModeAsync`；`playsInSilentMode=true`、`shouldPlayInBackground=true`、`interruptionMode='doNotMix'`、`shouldRouteThroughEarpiece=false`、`allowsRecording=false`。
-- 后台权限：`expo-audio` config plugin 显式启用 `enableBackgroundPlayback`，并关闭未使用的 `recordAudioAndroid`，避免申请无实际用途的录音权限。
-- 锁屏 metadata：`useRadioPlayer` 只暴露最小 `lockScreenPlayer` 边界；`useNowPlayingMedia` 负责 `setActiveForLockScreen`、metadata 更新与清理。
-- Expo Audio 56 没有真正的 next-track JS 回调；锁屏验收只承诺 PLAY/PAUSE 与 metadata，不把 seek forward 伪装成 NEXT。
-- TTS ducking：仍由应用内 `radio.setVolume(tts.playing ? 0.3 : 1)` 完成；系统级 `doNotMix` 是为了锁屏控件归属和长后台播放稳定性。
-- APK：走 EAS local preview APK；原生工程产物不得提交。
-
-### 9.2 当前执行顺序
-
-1. F.A：挂载 `useAudioSession()`，配置 `expo-audio` 后台播放 plugin，验证 Expo config。（已完成）
-2. F.B / F.E：WS 重连与 server graceful shutdown 运行时验收。（已完成）
-3. F.C：在 `useRadioPlayer` 边界上接 `setActiveForLockScreen` 和 metadata 更新。（代码已完成，真机待验收）
-4. F.D：补 `eas.json`、APK scripts、ignore 规则，并跑 APK 构建前检查。（当前阶段）
-5. Android 真机：安装 APK / dev build 后验证锁屏 metadata、PLAY/PAUSE、后台 ≥60s 持续播放。（待验收）
-
-### 9.3 验证口径
-
-- 终端命令：`pnpm typecheck`
-- 终端命令：`pnpm lint`
-- 终端命令：`pnpm --filter @claudio/mobile exec expo config --type public`
-- 终端命令：启动服务端后 `Ctrl+C`，5s 内看到 shutdown ok。
-- Android 真机操作：发消息、播放、TTS ducking、后台 / 锁屏连续播放。
-- APK 验收：`eas build --local` 产物可 sideload 安装并启动。
+- Phase F 已完成，完整历史设计归档到 `tasks/spec/phase-f-productization.md`。
+- 仍活跃决策：锁屏 metadata 不扩公开契约，只从现有 `Track.title / artist / artwork` 拼装。
+- 仍活跃决策：移动端音乐播放器与 TTS 播放器保持物理隔离；TTS 只通过音量 ducking 影响主音乐。
+- 仍活跃决策：BYO-LLM 用户自配 key/baseUrl/model 是独立未来阶段 Phase F.5，不并入已完成的后台播放 / APK 产品化任务。
 
 ---
 
-## 10. Phase F.pre：真实闭环验收前置修复
-
-> 本阶段经历一次纠偏：诊断 UI / 状态 API 不等于产品入口；当前仅保留用户输入显示修复，真实 LLM / 音源配置入口重新设计。
-
-### 10.1 代码现状
-
-- 用户输入提交链路已经存在：`apps/mobile/app/index.tsx` / `handleSend` 会调用 `apiClient.sendChat({ text, voice: ttsEnabled })`，成功后更新 DJ 文案、连接状态，并调用 `refreshNowAndNext()` 拉取当前曲与下一曲。
-- 用户气泡显示仍是静态占位：`apps/mobile/app/index.tsx` / `HomeScreen` 固定渲染 `<UserBubble text="好听" name="MMGUO" time="21:09" />`，没有保存最近一次用户输入，也没有把 `handleSend(text)` 的文本回填到 UI。
-- 服务端聊天主链路已经能按输入更新内存电台状态：`server/src/state/radioState.ts` / `handleChat` 会读取 `request.text`，调用 `resolveTracksForChat()` 得到候选曲，再写入 `radioState.currentTrack` 与 `radioState.queue`。
-- 当前真实 LLM 未启用时会稳定回退：`server/src/llm/llmAdapter.ts` / `generateDjResponse` 在当前模型 provider 没有 API key 时返回 `ok:false`，调用方会使用 mock fallback 文案。
-- 音乐 provider 机制只在服务端环境变量层启用：`server/src/music/providerRegistry.ts` / `buildProviderChain` 根据 `MUSIC_PROVIDER_CHAIN` 或默认链组装 `local → external → ncm? → fallback`；`local` 依赖 `MUSIC_LIBRARY_DIR + MEDIA_BASE_URL`，`external` 依赖 `EXTERNAL_MUSIC_RESOLVER_URL`，`ncm` 依赖 `MUSIC_API_BASE_URL`。
-- 外部音乐插件当前是进程外 HTTP resolver：`server/src/music/providers/externalResolverProvider.ts` / `searchPlayableTracks` 约定 `POST {base}/search` 返回含可播放 `url` 的 tracks；移动端没有“添加音乐插件 / 配置 resolver”的产品入口。
-- TTS 链路只负责 DJ 文案转语音：`server/src/state/radioState.ts` / `handleChat` 在 `request.voice` 为 true 时调用 `scheduleTts(response.say, chatId)`；TTS 不参与音乐搜索，也不会把 fallback 曲自动变成真实音乐。
-
-### 10.2 当前结论
-
-- 现在进入 Android 真机完整验收不明智：只能验证 `expo-audio` 锁屏 / 后台播放能力，不能验证真实 AI 电台闭环。
-- 真机验收前至少要完成两个前置点：用户发送内容必须在 UI 上真实显示；音乐源状态必须可见，避免用户误以为“插件已启用但没有生效”。
-- 若要验证真实音乐，必须先启用一个真实 provider：本地合法音源目录、外部 HTTP resolver 或显式 NCM 兼容服务；否则系统会按设计回退到 SoundHelix fallback。
-
-### 10.3 功能点与文件级计划
-
-#### 功能点 1：用户输入真实显示
-
-- 目标：发送任意文本后，右侧用户气泡立即显示该文本和当前时间，不再固定为“好听 / 21:09”。
-- 范围：只做最近一次用户消息显示；完整多轮聊天记录、持久化历史和滚动定位不进入本阶段。
-- 文件计划：
-  - `apps/mobile/app/index.tsx` / `HomeScreen`：新增最近用户消息 state，例如 `{ text, time } | null`；`handleSend(text)` 进入请求前先写入该 state，实现乐观显示。
-  - `apps/mobile/app/index.tsx` / `HomeScreen`：把固定 `<UserBubble text="好听" name="MMGUO" time="21:09" />` 改为按最近用户消息条件渲染。
-  - `packages/ui/src/UserBubble.tsx`：暂不改组件 API；现有 `text/name/time/avatarColor` 已满足本阶段。
-
-#### 功能点 2：真实闭环烟测路径
-
-- 目标：编码完成后先通过 Web / HTTP 证明“输入 → DJ 文案 → 当前曲 source → TTS 文案音频”链路更新，再恢复 Android 真机验收。
-- 验证计划：
-  - 终端命令：`pnpm typecheck`
-  - 终端命令：`pnpm lint`
-  - 终端命令：发送两次不同 `/api/chat` 文本，确认 `say` 与 `/api/now.track.title` 随请求变化。
-  - 浏览器操作：在 Expo Web 输入不同文本，确认右侧用户气泡更新为真实输入。
-
-### 10.4 风险与决策
-
-- 决策：本阶段不再新增诊断 UI 或诊断 API；只修复确定的用户输入显示 bug。
-- 决策：成熟“音乐插件入口 / 音源管理”和 BYO-LLM 后续必须单独立 Spec，先定义用户动作、配置安全边界和交互形态。
-- 风险：没有真实 LLM key 和真实 provider 时仍只能走 mock 文案与 SoundHelix fallback；真机验收前必须先完成真实配置入口或明确使用环境变量配置进行烟测。
-
----
-
-## 11. Phase G：LX-compatible 音乐源 Bridge
+## 10. Phase G：LX-compatible 音乐源 Bridge
 
 - 完整历史设计已拆到 `tasks/spec/phase-g-lx-bridge.md`。
 - 仍活跃决策：默认真实音乐源链路为 huibq 源 raw URL + Kuwo 候选搜索 + LX Bridge；用户可通过 `LX_SOURCE_SCRIPT_URL` / `LX_SOURCE_SCRIPT_FILE` / `LX_METADATA_RESOLVER_URL` / `LX_ENABLE_KUWO_SEARCH` 覆盖或关闭。
@@ -239,7 +168,7 @@
 
 ---
 
-## 12. radioState God Object 拆分
+## 11. radioState God Object 拆分
 
 - 完整历史设计已拆到 `tasks/spec/phase-radio-state-split.md`。
 - 仍活跃决策：`server/src/radio/intentParser.ts` 负责输入意图解析纯逻辑。
@@ -248,7 +177,7 @@
 
 ---
 
-## 13. Phase H：电台播放控制语义重整
+## 12. Phase H：电台播放控制语义重整
 
 - 完整历史设计已拆到 `tasks/spec/phase-h-radio-playback-controls.md`。
 - 仍活跃决策：主播放按钮永远是电台总控；歌曲和主播一起暂停 / 继续，不再根据 TTS ready 或 VOICE 状态切换控制对象。
@@ -257,7 +186,7 @@
 
 ---
 
-## 14. Phase I：默认 LX 双源池 + FLAC 优先
+## 13. Phase I：默认 LX 双源池 + FLAC 优先
 
 - 完整历史设计已拆到 `tasks/spec/phase-i-lx-dual-source-pool.md`。
 - 仍活跃决策：默认真实音乐链路为 `lx-primary -> lx-secondary -> fallback`，默认音质顺序为 `flac,320k,128k`。
@@ -269,27 +198,23 @@
 
 ---
 
-## 15. 产品迭代路线图
+## 14. 产品迭代路线图
 
 > 本章节只保存跨阶段主线，避免长周期目标被单次性能优化或 bugfix 打散。
 > 当前阶段完整 Spec 仍写在本文件的当前阶段区；完成后归档到 `tasks/spec/<phase>.md`。
 
-### 15.1 主线顺序
+### 14.1 主线顺序
 
-1. Phase J：队列与推荐体验收口。
-   - 明确单曲 / 情绪范围 / 多首歌单三类请求的队列数量。
-   - 明确上一首 / 下一首的可用状态，并让 UI 禁用不可用按钮。
-   - 明确用户主动切歌时主播是否播报、如何播报、是否重播旧播报。
-2. Phase K：像素海报。
+1. Phase K：歌曲像素海报。
    - 当前已有 `Track.artwork -> TrackArtworkPanel -> PixelClock fallback` 链路；后续补真正轻量像素海报生成 / 缓存策略。
-3. Phase L：用户歌单 JSON 偏好。
+2. Phase L：用户歌单 JSON 偏好。
    - 导入歌单只作为口味种子，提取偏好并推荐相似但不固定的歌曲；不能把导入歌单变成固定播放列表。
-4. Phase M：用户音源导入 UI。
+3. Phase M：用户音源导入 UI。
    - 默认双源池已可开箱即用；后续设置页提供用户源导入、验证、回滚和沙箱状态展示。
-5. Phase N：真实音频律动。
+4. Phase N：真实音频律动。
    - 当前频谱是视觉模拟；真实 FFT / PCM 律动需要单独评估 Web 与 Native 能力，不混入队列体验阶段。
 
-### 15.2 插队规则
+### 14.2 插队规则
 
 - P0 bug、安全问题、真机播放稳定性、明显性能回归可以插入为当前 Phase 的子阶段，例如 `Phase J.1`。
 - 插队阶段必须写清楚“插队原因、完成条件、回到哪条主线”，完成后回到本路线图的下一项。

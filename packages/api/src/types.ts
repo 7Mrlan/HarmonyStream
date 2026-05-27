@@ -115,7 +115,6 @@ export interface PlanResponse {
 export interface ModelInfo {
   id: string; // 'deepseek' / 'qwen' / 'glm'
   displayName: string; // 'DeepSeek' / '通义千问' / '智谱'
-  petSprite: string; // 像素宠物 sprite key
 }
 
 export interface ModelsResponse {

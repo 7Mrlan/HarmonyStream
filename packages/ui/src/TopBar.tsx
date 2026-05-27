@@ -3,7 +3,7 @@
  * 作用：顶部状态栏，包含头像、Claudio 文字 logo、当前 AI 模型徽章、LOGIN / DARK / LIGHT 三档按钮
  * 设计：纯文字按钮，硬边框 1px，不使用圆角胶囊，强化像素风
  *      v1 LIGHT 按钮仅占位（spec §3.7：v1 不做亮色模式），点击不响应或弹 Toast
- *      AI 徽章固定在顶部，避免右下角宠物浮层与正文气泡互相遮挡
+ *      AI 徽章固定在顶部，集中展示当前模型状态
  */
 
 import { Pressable, Text, View } from 'react-native';
@@ -39,9 +39,7 @@ function SegmentButton({ label, active, onPress }: SegmentButtonProps) {
       onPress={onPress}
       className={`px-3 py-1 border border-line ${active ? 'bg-text' : 'bg-transparent'} active:bg-line`}
     >
-      <Text
-        className={`font-pixel text-xs tracking-pixel ${active ? 'text-bg' : 'text-text'}`}
-      >
+      <Text className={`font-pixel text-xs tracking-pixel ${active ? 'text-bg' : 'text-text'}`}>
         {label}
       </Text>
     </Pressable>
@@ -61,17 +59,11 @@ export function TopBar({
     <View className="flex-row items-center justify-between px-4 py-3">
       {/* 左侧：方块头像 + Claudio 文字 logo + AI 模型徽章 */}
       <View className="flex-row items-center" style={{ flexShrink: 1 }}>
-        <View
-          className="border border-line bg-panel mr-2"
-          style={{ width: 28, height: 28 }}
-        />
+        <View className="border border-line bg-panel mr-2" style={{ width: 28, height: 28 }} />
         <Text className="font-pixel text-text text-2xl tracking-pixel">Claudio</Text>
-        {/* AI 模型徽章：左侧 AI 标签 + 右侧模型名，整体反白边框，与底部宠物联动 */}
+        {/* AI 模型徽章：左侧 AI 标签 + 右侧模型名，整体反白边框 */}
         {modelName ? (
-          <View
-            className="flex-row items-center border border-line ml-3"
-            style={{ height: 22 }}
-          >
+          <View className="flex-row items-center border border-line ml-3" style={{ height: 22 }}>
             <View className="bg-text px-1.5" style={{ height: '100%', justifyContent: 'center' }}>
               <Text className="font-pixel text-bg tracking-pixel" style={{ fontSize: 10 }}>
                 AI
@@ -92,10 +84,7 @@ export function TopBar({
 
       {/* 右侧：登录态 + 主题切换 */}
       <View className="flex-row items-center" style={{ gap: 6 }}>
-        <SegmentButton
-          label={loggedIn && userName ? userName : 'LOGIN'}
-          onPress={onPressLogin}
-        />
+        <SegmentButton label={loggedIn && userName ? userName : 'LOGIN'} onPress={onPressLogin} />
         <SegmentButton label="DARK" active={theme === 'dark'} onPress={onPressDark} />
         <SegmentButton label="LIGHT" active={theme === 'light'} onPress={onPressLight} />
       </View>

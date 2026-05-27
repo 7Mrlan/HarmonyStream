@@ -35,11 +35,8 @@ export type { OnAirIndicatorProps } from './OnAirIndicator';
 export { PixelClock } from './PixelClock';
 export type { PixelClockProps } from './PixelClock';
 
-export { PixelPetSwitcher, DEFAULT_PETS } from './PixelPetSwitcher';
-export type { PetAction, PixelPetSwitcherProps, PetMeta } from './PixelPetSwitcher';
-
 export { PlayerControls } from './PlayerControls';
-export type { PlayerControlAction, PlayerControlsProps } from './PlayerControls';
+export type { PlayerControlsProps } from './PlayerControls';
 
 export { RadioTuningLoader } from './RadioTuningLoader';
 export type { RadioTuningLoaderProps } from './RadioTuningLoader';

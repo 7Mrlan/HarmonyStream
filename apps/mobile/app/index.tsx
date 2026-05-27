@@ -7,7 +7,6 @@
  *     2. 内容流（顶 → 底）    TopBar / Clock / OnAir / DateLine
  *                              / NowPlayingBar / PlayerControls
  *                              / DJBubble / UserBubble / ChatInput / Connection
- *     4. PixelPetSwitcher     右下角浮层（漂浮 + 眨眼 + 招呼气泡）
  *
  * 布局：宽屏（>= 768）下内容居中、最大宽度 720，避免 PC 端松散
  *      暗色 + 像素风的"门面感"必须由收紧的窗口来撑
@@ -29,20 +28,17 @@ import {
   ChatInput,
   ConnectionStatus,
   DateLine,
-  DEFAULT_PETS,
   DJBubble,
   DotMatrixBackground,
   MusicSpectrum,
   NowPlayingBar,
   OnAirIndicator,
   PixelClock,
-  PixelPetSwitcher,
   PlaybackProgressBar,
   PlayerControls,
   TopBar,
   TrackArtworkPanel,
   UserBubble,
-  type PlayerControlAction,
 } from '@claudio/ui';
 import { getApiBaseUrl } from './_config/api';
 import { useNowPlayingMedia } from './_hooks/useNowPlayingMedia';
@@ -92,13 +88,10 @@ function formatBubbleTime(date = new Date()): string {
 
 /*
  * 按模型 id 获取展示名。
- * 优先使用服务端 `/api/models` 返回值，失败时回退本地宠物配置。
+ * 服务端模型列表是当前唯一来源，避免 UI 再维护一份模型副本。
  */
 function getModelDisplayName(modelId: string, models: ModelInfo[]): string | undefined {
-  return (
-    models.find((model) => model.id === modelId)?.displayName ??
-    DEFAULT_PETS.find((pet) => pet.id === modelId)?.displayName
-  );
+  return models.find((model) => model.id === modelId)?.displayName;
 }
 
 /* 生成播放器曲目的稳定 key，供 track-aware TTS 做二次校验。 */
@@ -129,8 +122,10 @@ export default function HomeScreen() {
 
   /* Claudio API client：集中读取 base URL，页面不散写 fetch 地址 */
   const apiClient = useMemo(() => createApiClient({ baseUrl: getApiBaseUrl() }), []);
-  /* 服务端模型列表，控制 TopBar 和宠物切换 */
+  /* 服务端模型列表，控制 TopBar 模型展示 */
   const [models, setModels] = useState<ModelInfo[]>([]);
+  /* 当前模型 id；切换入口后续由新的模型菜单重新接入。 */
+  const [currentModelId, setCurrentModelId] = useState<string>('deepseek');
   /* 服务端曲目队列。为空时播放器保持空信号，不播放本地 demo 曲。 */
   const [serverPlaylist, setServerPlaylist] = useState<RadioTrack[]>([]);
   /* Phase H：整站暂停态；暂停时换歌只换曲目信息，不自动出声。 */
@@ -149,9 +144,6 @@ export default function HomeScreen() {
   /* 播放器动画只在真实播放且未结束时运行，暂停/播完进入 idle 收尾态。 */
   const animationActive = radio.playing && !radio.ended;
   const [faved, setFaved] = useState(false);
-  const [petId, setPetId] = useState<string>('deepseek');
-  const [petAction, setPetAction] = useState<PlayerControlAction | null>(null);
-  const [petActionNonce, setPetActionNonce] = useState(0);
   const [djText, setDjText] = useState(DEFAULT_DJ_TEXT);
   const [djTime, setDjTime] = useState('21:02');
   const [djLoading, setDjLoading] = useState(false);
@@ -175,7 +167,7 @@ export default function HomeScreen() {
     ttsEnabledRef.current = nextValue;
     setTtsEnabledState(nextValue);
   }, []);
-  const currentModelName = getModelDisplayName(petId, models);
+  const currentModelName = getModelDisplayName(currentModelId, models);
   const artworkUrl = radio.track.artwork;
   const showTrackArtwork = Boolean(artworkUrl && failedArtworkUrl !== artworkUrl);
   const artworkPanelSize = isWide ? 260 : 220;
@@ -199,22 +191,16 @@ export default function HomeScreen() {
   }, [artworkUrl]);
 
   /*
-   * 播放器按钮触发宠物反馈。
-   * actionNonce 用于让同一个动作重复触发动画。
-   */
-  function triggerPetAction(action: PlayerControlAction) {
-    setPetAction(action);
-    setPetActionNonce((value) => value + 1);
-  }
-
-  /*
    * 用服务端曲目刷新播放器队列。
    * 只接受有 url 的 Track，避免播放器收到不可播放条目。
    */
-  const applyApiTracks = useCallback((tracks: Array<Track | null | undefined>, allowEmpty = false) => {
-    const mappedTracks = mapApiTracksToRadioTracks(tracks);
-    if (mappedTracks.length > 0 || allowEmpty) setServerPlaylist(mappedTracks);
-  }, []);
+  const applyApiTracks = useCallback(
+    (tracks: Array<Track | null | undefined>, allowEmpty = false) => {
+      const mappedTracks = mapApiTracksToRadioTracks(tracks);
+      if (mappedTracks.length > 0 || allowEmpty) setServerPlaylist(mappedTracks);
+    },
+    [],
+  );
 
   /*
    * 追加服务端返回的下一首。
@@ -239,7 +225,8 @@ export default function HomeScreen() {
     const [now, next] = await Promise.all([apiClient.getNow(), apiClient.getNext()]);
     applyApiTracks([now.track, next.track], true);
     setPlaybackCapabilities(
-      now.playback ?? inferPlaybackCapabilitiesFromQueue([now.track, next.track].filter(Boolean).length),
+      now.playback ??
+        inferPlaybackCapabilitiesFromQueue([now.track, next.track].filter(Boolean).length),
     );
   }, [apiClient, applyApiTracks]);
 
@@ -361,7 +348,7 @@ export default function HomeScreen() {
 
         if (disposed) return;
         setModels(modelsResponse.available);
-        setPetId(modelsResponse.current);
+        setCurrentModelId(modelsResponse.current);
         applyApiTracks([nowResponse.track], true);
         setPlaybackCapabilities(
           nowResponse.playback ?? inferPlaybackCapabilitiesFromQueue(nowResponse.track ? 1 : 0),
@@ -388,7 +375,8 @@ export default function HomeScreen() {
         if (!disposed) setConnectionState('connecting');
       },
       onError: () => {
-        if (!disposed) setConnectionState((state) => (state === 'connected' ? 'connecting' : state));
+        if (!disposed)
+          setConnectionState((state) => (state === 'connected' ? 'connecting' : state));
       },
       onEvent: (event) => {
         if (!disposed) handleStreamEvent(event);
@@ -460,34 +448,6 @@ export default function HomeScreen() {
     [apiClient, refreshNowAndNext],
   );
 
-  /*
-   * 切换服务端模型。
-   * 服务端是权威来源；失败时回滚本地宠物 id。
-   */
-  const handlePetSwitch = useCallback(
-    async (nextId: string) => {
-      const previousId = petId;
-      setPetId(nextId);
-      setConnectionState('connecting');
-
-      try {
-        const switchResult = await apiClient.switchModel(nextId);
-        if (!switchResult.ok) throw new Error('模型切换失败');
-
-        const modelsResponse = await apiClient.getModels();
-        setModels(modelsResponse.available);
-        setPetId(modelsResponse.current);
-        setConnectionState('connected');
-      } catch {
-        setPetId(previousId);
-        setConnectionState('offline');
-        setDjText('模型切换失败。Claudio 已保留当前模型，等服务端恢复后再试。');
-        setDjTime(formatBubbleTime());
-      }
-    },
-    [apiClient, petId],
-  );
-
   return (
     <View className="flex-1 bg-bg">
       {/* 第 1 层：点阵背景（全屏） */}
@@ -509,7 +469,7 @@ export default function HomeScreen() {
             maxWidth: isWide ? CONTENT_MAX_WIDTH : undefined,
           }}
         >
-          {/* 顶部状态栏（带 AI 模型徽章，避免右下角宠物名遮挡正文） */}
+          {/* 顶部状态栏（带 AI 模型徽章，集中展示当前模型） */}
           <TopBar modelName={currentModelName} />
 
           {/* 封面 / 时钟 + ON AIR：有歌曲封面时优先展示封面，失败时回退时钟。 */}
@@ -573,7 +533,6 @@ export default function HomeScreen() {
             onNext={station.nextTrack}
             onStop={station.stopStation}
             onFav={() => setFaved((f) => !f)}
-            onActionFeedback={triggerPetAction}
           />
 
           {/* DJ 长文气泡 */}
@@ -609,24 +568,6 @@ export default function HomeScreen() {
           <ChatInput sending={chatSending} onSend={handleSend} onMicPress={() => undefined} />
           <ConnectionStatus state={connectionState} />
         </View>
-      </View>
-
-      {/* 第 4 层：右下角浮动宠物切换器 */}
-      <View
-        style={{
-          position: 'absolute',
-          right: 12,
-          bottom: 96 + insets.bottom,
-        }}
-        pointerEvents="box-none"
-      >
-        <PixelPetSwitcher
-          currentId={petId}
-          action={petAction}
-          actionNonce={petActionNonce}
-          onSwitch={handlePetSwitch}
-          onLongPress={() => undefined}
-        />
       </View>
     </View>
   );

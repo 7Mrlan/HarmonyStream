@@ -413,3 +413,15 @@
 **规则**：1. 编码完成后默认优先运行固定入口 `pnpm test`，覆盖全仓 typecheck 和 server 纯函数单元测试，不手写临时验证脚本。2. 影响 `/api/chat`、`/api/now`、队列提交、无曲目分支或音乐解析链路时运行 `pnpm test:full`，它会先跑 `pnpm test`，再跑固定 `smoke:radio`。3. `smoke:radio` 只作为 `test:full` 的结构层：自动 build、找临时端口、使用合法 `LOG_LEVEL=fatal`、等待 `/health`、结束清理进程；不把真实音源中某首歌一定命中当验收标准。4. 新增测试必须进入稳定自动化入口，不能留下临时 debug/smoke 脚本；真实音源质量和真机体验另开专项测试，不混入结构 smoke。
 
 **关联文件**：`package.json`、`server/package.json`、`server/scripts/smoke-radio.ts`、`server/src/**/*.test.ts`、`tasks/testing.md`、`AGENTS.md`
+
+---
+
+## 2026-05-27 - 判断下一阶段前必须先校准任务真源
+
+**触发**：用户指出我把下一步误判回 Phase F，但项目实际上已经完成 F 并进入 Phase K/L/M/N 路线图；`tasks/spec.md` 顶部索引和中部残留正文互相矛盾。
+
+**根因**：我基于残留的“Phase F 当前真源 / 当前阶段”段落继续推理，没有先同时核对 `tasks/spec.md` 当前活跃索引、`tasks/todo.md` 当前主线和 `tasks/spec/` 归档列表。
+
+**规则**：1. 每次推荐“下一步”前先核对 `tasks/spec.md` 顶部当前活跃索引、`tasks/todo.md` 当前主线和已归档阶段列表。2. 如果同一阶段同时出现“已完成”和“当前阶段 / 未完成”，先修正文档真源，不进入方案或编码。3. 已完成阶段的完整正文必须归档到 `tasks/spec/<phase>.md`，`tasks/spec.md` 只留 3-5 行摘要和仍活跃决策。4. 用户指出阶段判断错误时，必须把纠偏规则写入 `tasks/lessons.md`，避免下次又被旧正文带偏。
+
+**关联文件**：`tasks/spec.md`、`tasks/todo.md`、`tasks/spec/phase-f-productization.md`
