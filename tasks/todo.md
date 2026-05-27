@@ -82,6 +82,8 @@
 - [x] 删除 `PixelPetSwitcher` 组件文件与 UI 包导出。
 - [x] 删除 API / 服务端模型数据中的 `petSprite` 字段，保留模型本身。
 - [x] 运行 typecheck / lint，复核没有宠物残留引用。
+- [x] 将“旧宠物失败复盘与新宠物准入规则”写入 `tasks/spec.md`，防止后续上下文遗漏。
+- [x] 尝试安装外部 Spec / 设计审查 skill；网络无法连接 GitHub 时创建项目内 `spec-review` skill 作为固定审查框架。
 
 ### Review
 
@@ -89,4 +91,7 @@
 - `apps/mobile/app/index.tsx` 不再挂载右下角浮层，不再维护 `petId` / `petAction` / `petActionNonce`，播放器控件不再发宠物反馈。
 - `packages/api/src/types.ts` 与 `server/src/state/modelState.ts` 已删除 `petSprite`，模型本身和当前模型展示保留。
 - 代码残留搜索通过：`PixelPetSwitcher`、`petSprite`、`DEFAULT_PETS`、`onActionFeedback` 在 `apps/packages/server` 下无命中。
+- `tasks/spec.md` 已新增角色 / 宠物动画准入规则：禁止贴图漂浮冒充动画；prototype 也必须有角色人格、六类可区分状态和避让策略。
+- 外部 skill 搜索结果：`ferueda/agent-skills@review-spec`、`julianoczkowski/designer-skills@design-review` 符合方向；安装因当前网络无法连接 GitHub 失败。
+- 已新增 `.agents/skills/spec-review/SKILL.md`，后续审核 Spec / 方案时必须用它检查证据、验收、范围、角色生命感和失败退出标准。
 - 验证通过：`pnpm typecheck`、`pnpm lint`、`pnpm test`。

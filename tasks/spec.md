@@ -50,6 +50,19 @@
 - React state 只承载业务状态和低频变化，不承载每帧动画值。
 - 参考 HTML/CSS 时，先做关键视觉参数映射，再迁移到当前框架；不能主观加层或压缩比例。
 
+### 2.1 角色 / 宠物动画准入规则
+
+- 当前旧宠物体系已废弃：`PixelPetSwitcher` 代表的“右下角贴图按钮 + 容器漂浮摆动”不是合格宠物方案，后续不得复用该方向。
+- 宠物若重新进入产品，必须是“有角色生命感的系统伴侣”，不是模型切换图标、装饰贴图或浮动徽章。
+- 禁止把外层容器 `translateY`、`rotate`、`scale` 单独称为宠物动画；这些只能算运动包装，不能替代角色本体动画。
+- 每个宠物动作必须有角色本体变化：眼睛、嘴、头、身体、手脚、姿态、帧图或分层部件至少一项发生可观察变化。
+- 第一版 prototype 也不能使用简陋无人格角色；角色必须有明确人格、轮廓、表情语言和与 Claudio 电台气质一致的视觉方向。
+- 最低状态集：`idle`、`look`、`listen`、`speak`、`sleep`、`drag`。六类状态必须肉眼一眼可区分，不能只靠位置偏移区分。
+- 行为必须有情境：播放音乐时听歌 / 点头，TTS 主播说话时张嘴或表情变化，用户长时间不操作时睡觉，被拖拽时有被拎起或挣扎反馈。
+- 宠物默认不得遮挡正文、输入框、播放控制或封面主视觉；必须具备贴边、半隐藏、避让输入区、收起或关闭策略。
+- 新宠物正式集成前必须先做可删除 prototype；prototype 不达标就删除，不进入主界面，不以“先占位后打磨”为理由合并。
+- 新宠物方案必须先通过 `spec-review` 审查，再进入实现 HARD-GATE；审查重点是角色生命感、动作资产、状态机、性能、遮挡与验收标准。
+
 ---
 
 ## 3. API 契约真源
@@ -128,24 +141,24 @@
 
 ## 8. 历史阶段摘要
 
-| 阶段 | 状态 | 当前仍有效的结论 |
-|---|---:|---|
-| Iter 0 | 完成 | monorepo、共享 tsconfig、UI/core/api/server/mobile 骨架已建立。 |
-| UI 动画架构 | 完成 | 高频视觉走 Reanimated + Skia / Web canvas；避免 JS RAF + React state 热路径。 |
-| Phase A | 完成 | 服务端 `/api/chat`、`/api/now`、`/api/next`、`/api/models`、`/stream` 已打通内存闭环。 |
-| Phase B | 完成 | 移动端通过 `packages/api` 接入服务端 HTTP / WS；服务端 playlist 可覆盖本地默认播放列表。 |
-| Phase C | 完成 | 服务端 LLM adapter 已接入；DeepSeek 真实路径与无 key fallback 均验证通过。 |
-| Phase C+ | 完成 | DJ 气泡等待态已切到调频动画；不再使用本地假等待文案。 |
-| Phase D | 完成 | 服务端 `musicResolver` + fallback catalog + 可选 `ncm` provider；移动端 artwork 链路打通。 |
-| Phase D.5 | 完成 | provider chain、TTL/LRU cache、Range route、客户端 60% 预热、metrics 已落地。 |
-| Phase E | 完成 | `msedge-tts` 接入；`tts-ready`、`/media/tts/:id`、独立 `useTtsPlayer`、DJBubble REPLAY 已落地。 |
-| Phase H | 完成 | 电台总控 / 歌曲队列 / 主播语音三层语义落地；完整历史见 `tasks/spec/phase-h-radio-playback-controls.md`。 |
-| Phase J | 完成 | 队列数量、上一首 / 下一首禁用、后台续推、切歌短播报与 track-aware TTS 过期保护已落地；完整历史见 `tasks/spec/phase-j-queue-recommendation-experience.md`。 |
-| Phase J.1 | 完成 | `radioState.ts` 保留 facade，模型、队列纯函数、session 续推、切歌播报拆入独立模块；完整历史见 `tasks/spec/phase-j1-radio-state-orchestration-split.md`。 |
-| Phase J.2 | 完成 | chat planning 抽入 `chatTurnPlanner.ts`，`radioState.ts` 只保留状态提交与副作用；完整历史见 `tasks/spec/phase-j2-chat-turn-planner.md`。 |
-| Phase J.3 | 完成 | 新增 Vitest 单元测试与根 `test/test:full` 两层入口，修复明确点歌解析顺序 bug；完整历史见 `tasks/spec/phase-j3-automated-test-entry.md`。 |
-| Phase F | 完成 | SDK 56 后台播放、锁屏 metadata、APK 构建入口、WS 重连与 graceful shutdown 已落地；完整历史见 `tasks/spec/phase-f-productization.md`。 |
-| Phase F.0 | 完成 | Expo SDK 56 / React 19.2.6 / RN 0.85.3 / TypeScript 6.0.3 升级完成；NativeWind 类型 shim 和临时 override 已清理。 |
+| 阶段        | 状态 | 当前仍有效的结论                                                                                                                                           |
+| ----------- | ---: | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Iter 0      | 完成 | monorepo、共享 tsconfig、UI/core/api/server/mobile 骨架已建立。                                                                                            |
+| UI 动画架构 | 完成 | 高频视觉走 Reanimated + Skia / Web canvas；避免 JS RAF + React state 热路径。                                                                              |
+| Phase A     | 完成 | 服务端 `/api/chat`、`/api/now`、`/api/next`、`/api/models`、`/stream` 已打通内存闭环。                                                                     |
+| Phase B     | 完成 | 移动端通过 `packages/api` 接入服务端 HTTP / WS；服务端 playlist 可覆盖本地默认播放列表。                                                                   |
+| Phase C     | 完成 | 服务端 LLM adapter 已接入；DeepSeek 真实路径与无 key fallback 均验证通过。                                                                                 |
+| Phase C+    | 完成 | DJ 气泡等待态已切到调频动画；不再使用本地假等待文案。                                                                                                      |
+| Phase D     | 完成 | 服务端 `musicResolver` + fallback catalog + 可选 `ncm` provider；移动端 artwork 链路打通。                                                                 |
+| Phase D.5   | 完成 | provider chain、TTL/LRU cache、Range route、客户端 60% 预热、metrics 已落地。                                                                              |
+| Phase E     | 完成 | `msedge-tts` 接入；`tts-ready`、`/media/tts/:id`、独立 `useTtsPlayer`、DJBubble REPLAY 已落地。                                                            |
+| Phase H     | 完成 | 电台总控 / 歌曲队列 / 主播语音三层语义落地；完整历史见 `tasks/spec/phase-h-radio-playback-controls.md`。                                                   |
+| Phase J     | 完成 | 队列数量、上一首 / 下一首禁用、后台续推、切歌短播报与 track-aware TTS 过期保护已落地；完整历史见 `tasks/spec/phase-j-queue-recommendation-experience.md`。 |
+| Phase J.1   | 完成 | `radioState.ts` 保留 facade，模型、队列纯函数、session 续推、切歌播报拆入独立模块；完整历史见 `tasks/spec/phase-j1-radio-state-orchestration-split.md`。   |
+| Phase J.2   | 完成 | chat planning 抽入 `chatTurnPlanner.ts`，`radioState.ts` 只保留状态提交与副作用；完整历史见 `tasks/spec/phase-j2-chat-turn-planner.md`。                   |
+| Phase J.3   | 完成 | 新增 Vitest 单元测试与根 `test/test:full` 两层入口，修复明确点歌解析顺序 bug；完整历史见 `tasks/spec/phase-j3-automated-test-entry.md`。                   |
+| Phase F     | 完成 | SDK 56 后台播放、锁屏 metadata、APK 构建入口、WS 重连与 graceful shutdown 已落地；完整历史见 `tasks/spec/phase-f-productization.md`。                      |
+| Phase F.0   | 完成 | Expo SDK 56 / React 19.2.6 / RN 0.85.3 / TypeScript 6.0.3 升级完成；NativeWind 类型 shim 和临时 override 已清理。                                          |
 
 ---
 
