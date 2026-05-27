@@ -2,7 +2,7 @@
  * TTS 服务入口
  * ------------
  * 把 LLM 输出的 say 文本合成为可播放音频。
- *   - cache key = sha1(text + '|' + voice + '|' + speed).slice(0, 16)
+ *   - cache key = sha1(provider + '|' + text + '|' + voice + '|' + speed).slice(0, 16)
  *   - 命中：直接返回缓存的 audioId
  *   - miss：依次尝试 chain，第一个成功就 putAudio + 写 cache
  *   - 全部失败：返回 null，由调用方决定是否广播 tts-ready
@@ -34,16 +34,29 @@ export interface TtsResolveResult {
   providerId: string;
 }
 
+interface TtsCacheEntry {
+  id: string;
+  mime: string;
+  providerId: string;
+}
+
+/* 工具：MusicCache 的 onEvict 使用 unknown，这里只释放本服务写入的音频条目。 */
+function isTtsCacheEntry(value: unknown): value is TtsCacheEntry {
+  if (!value || typeof value !== 'object') return false;
+  const entry = value as Partial<TtsCacheEntry>;
+  return typeof entry.id === 'string';
+}
+
 /*
- * cache key → audioId 映射。
+ * cache key → 音频元信息映射。
  * audioStore 自身有 LRU 淘汰；这里也走 LRU，并在 evict 时删除 audioStore 对应条目，
  * 避免 cache 表里已经被淘汰的 id 再次返回成"幻觉命中"。
  */
-const idCache: MusicCache<string> = createMusicCache<string>({
+const idCache: MusicCache<TtsCacheEntry> = createMusicCache<TtsCacheEntry>({
   maxEntries: env.TTS_CACHE_MAX_ENTRIES,
   defaultTtlMs: env.TTS_CACHE_TTL_MS,
-  onEvict: (_key, audioId) => {
-    if (typeof audioId === 'string') deleteAudio(audioId);
+  onEvict: (_key, entry) => {
+    if (isTtsCacheEntry(entry)) deleteAudio(entry.id);
   },
 });
 
@@ -55,23 +68,33 @@ export async function synthesizeForChat(req: TtsRequest): Promise<TtsResolveResu
   const text = req.text.trim();
   if (!text) return null;
 
-  const voice = req.voice?.trim() || env.TTS_DEFAULT_VOICE;
+  const requestedVoice = req.voice?.trim();
   const speed = typeof req.speed === 'number' ? req.speed : 1;
-  const cacheKey = buildCacheKey(text, voice, speed);
-
-  const cachedId = idCache.get(cacheKey);
-  if (cachedId) {
-    recordCacheHit('tts');
-    const cached = getAudio(cachedId);
-    return { id: cachedId, mime: cached?.mime ?? 'audio/mpeg', providerId: 'cache' };
-  }
 
   const chain = getTtsProviderChain();
   for (const provider of chain) {
+    const voice = requestedVoice || provider.manifest.defaultVoice;
+    const provisionalCacheKey = buildCacheKey(provider.manifest.id, text, voice, speed);
+    const cachedEntry = idCache.get(provisionalCacheKey);
+    if (cachedEntry) {
+      const cached = getAudio(cachedEntry.id);
+      if (cached) {
+        recordCacheHit('tts');
+        return {
+          id: cachedEntry.id,
+          mime: cached.mime,
+          providerId: `cache:${cachedEntry.providerId}`,
+        };
+      }
+    }
+
     try {
       const result = await provider.synthesize({ text, voice, speed });
+      const cacheKey = buildCacheKey(provider.manifest.id, text, result.voice, speed);
       const id = putAudio(result.audio, result.mime, env.TTS_CACHE_TTL_MS);
-      writeIdCache(cacheKey, id);
+      const cacheEntry = { id, mime: result.mime, providerId: provider.manifest.id };
+      writeIdCache(cacheKey, cacheEntry);
+      if (cacheKey !== provisionalCacheKey) writeIdCache(provisionalCacheKey, cacheEntry);
       return { id, mime: result.mime, providerId: provider.manifest.id };
     } catch (error) {
       console.warn(
@@ -87,14 +110,14 @@ export async function synthesizeForChat(req: TtsRequest): Promise<TtsResolveResu
 }
 
 /* 暴露 cache key 构建函数，便于后续单元测试。 */
-export function buildCacheKey(text: string, voice: string, speed: number): string {
+export function buildCacheKey(providerId: string, text: string, voice: string, speed: number): string {
   return createHash('sha1')
-    .update(`${text}|${voice}|${speed}`)
+    .update(`${providerId}|${text}|${voice}|${speed}`)
     .digest('hex')
     .slice(0, 16);
 }
 
 /* 内部：写入 id cache；旧 id 的清理由 cache onEvict 统一处理。 */
-function writeIdCache(key: string, audioId: string): void {
-  idCache.set(key, audioId);
+function writeIdCache(key: string, entry: TtsCacheEntry): void {
+  idCache.set(key, entry);
 }

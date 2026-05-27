@@ -6,6 +6,7 @@
  */
 
 import type { NowResponse, Track } from '@claudio/api';
+import type { MusicRequestKind } from '../radio/intentParser.js';
 
 export interface OpenAiChatMessage {
   role: 'system' | 'user';
@@ -19,7 +20,7 @@ export interface BuildDjPromptInput {
   currentTrack: Track | null;
   selectedTrack: Track;
   candidateTracks: Track[];
-  requestKind?: 'explicit' | 'genre' | 'generic' | 'multi';
+  requestKind?: MusicRequestKind;
 }
 
 export interface BuildMusicIntentPromptInput {

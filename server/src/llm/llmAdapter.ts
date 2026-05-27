@@ -7,6 +7,7 @@
 
 import type { ChatResponse, NowResponse, Track } from '@claudio/api';
 import { env } from '../env.js';
+import type { MusicRequestKind } from '../radio/intentParser.js';
 import { buildDjPrompt, buildMusicIntentPrompt, buildTrackCommentaryPrompt } from './prompt.js';
 
 interface ProviderConfig {
@@ -27,7 +28,7 @@ export interface GenerateDjResponseInput {
   currentTrack: Track | null;
   selectedTrack: Track;
   candidateTracks: Track[];
-  requestKind?: 'explicit' | 'genre' | 'generic' | 'multi';
+  requestKind?: MusicRequestKind;
 }
 
 export interface MusicIntent {

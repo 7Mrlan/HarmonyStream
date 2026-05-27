@@ -108,3 +108,21 @@
 - 测试覆盖 `playbackQueue`、`intentParser`、`cache`、`titleMatch` 的关键纯函数和回归点。
 - 单元测试发现并修复真实 bug：`我想听周杰伦的晴天` 曾被裸 `X的Y` 规则误解析成 artist=`我想听周杰伦`；现在先匹配带前缀点歌，再匹配裸 `周杰伦的晴天`。
 - 验证通过：`pnpm test`、`pnpm test:full`、`pnpm lint`。
+
+---
+
+## 当前任务 · 小米 TTS 默认与审查修复
+
+- [x] 定位 Edge TTS 残留、`requestKind` 接线和 TTS cache 维度问题。
+- [x] 删除 Edge TTS provider 与依赖，默认只启用小米 MiMo。
+- [x] 修复 `requestKind` 未传入 `generateDjResponse`。
+- [x] 修复 TTS cache 未区分实际 provider / voice。
+- [x] 跑 `pnpm test:full` 并再次用 `code-review` skill 审查。
+
+### Review
+
+- 当前 Edge 残留：`server/src/tts/providerRegistry.ts` 默认链包含 `edge`，`server/package.json` 依赖 `msedge-tts`，`server/src/tts/providers/edgeProvider.ts` 仍在仓库内。
+- 修复：`providerRegistry` 默认链改为 `['mimo']`，支持 key 只保留 `mimo/doubao`；删除 `edgeProvider.ts` 与 `msedge-tts` 依赖，lockfile 同步移除相关包。
+- 修复：`chatTurnPlanner` 将 `requestKind` 传入 `generateDjResponse`，`llmAdapter/prompt` 类型改用现有 `MusicRequestKind`。
+- 修复：TTS cache key 增加 `providerId` 与实际 `result.voice` 维度，并新增 `server/src/tts/ttsService.test.ts` 覆盖 provider/voice/speed 区分。
+- 验证通过：`pnpm test:full`，5 个 server 测试文件 / 17 个测试通过，radio smoke 通过。

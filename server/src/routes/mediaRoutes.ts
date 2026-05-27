@@ -30,7 +30,7 @@ const MIME_BY_EXT: Record<string, string> = {
 /*
  * 注册 media 路由。
  *   - /media/local/:id：仅 MUSIC_LIBRARY_DIR 配置时挂载
- *   - /media/tts/:id  ：始终挂载（v1 默认 Edge TTS 不需要任何配置即可工作）
+ *   - /media/tts/:id  ：始终挂载，用于返回已合成的 TTS 内存音频
  */
 export function registerMediaRoutes(app: FastifyInstance): void {
   registerLocalMedia(app);

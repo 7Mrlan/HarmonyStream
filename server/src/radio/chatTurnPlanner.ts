@@ -105,6 +105,7 @@ export async function planChatTurn(request: ChatRequest, context: ChatTurnPlanni
         currentTrack: context.currentTrack,
         selectedTrack,
         candidateTracks,
+        requestKind,
       });
   const response = generated?.ok
     ? generated.response

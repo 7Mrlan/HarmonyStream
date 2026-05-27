@@ -175,7 +175,6 @@ const EnvSchema = z.object({
   ZHIPU_BASE_URL: envStringWithDefault('https://open.bigmodel.cn/api/paas/v4'),
   ZHIPU_MODEL: envStringWithDefault('glm-4-flash'),
   TTS_PROVIDER_CHAIN: MusicProviderChain,
-  TTS_DEFAULT_VOICE: envStringWithDefault('zh-CN-XiaoxiaoNeural'),
   TTS_TIMEOUT_MS: positiveIntegerWithMax(8000, 30000),
   TTS_CACHE_MAX_ENTRIES: positiveIntegerWithMax(32, 1024),
   TTS_CACHE_TTL_MS: positiveIntegerWithMax(5 * 60 * 1000, 60 * 60 * 1000),

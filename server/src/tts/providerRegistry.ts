@@ -1,19 +1,18 @@
 /*
  * TTS provider 注册表
  * --------------------
- * 按 TTS_PROVIDER_CHAIN 配置组装 chain；未配置时使用默认链 'edge'。
+ * 按 TTS_PROVIDER_CHAIN 配置组装 chain；未配置时默认只启用小米 MiMo。
  *   - chain 顺序决定 fallback 优先级
  *   - 与 server/src/music/providerRegistry.ts 同结构
  */
 
 import { env } from '../env.js';
 import { createDoubaoTtsProvider } from './providers/doubaoProvider.js';
-import { createEdgeTtsProvider } from './providers/edgeProvider.js';
 import { createMimoTtsProvider } from './providers/mimoProvider.js';
 import type { TtsProvider } from './types.js';
 
 /* 受支持的 chain 关键字。 */
-const SUPPORTED_KEYS = new Set(['edge', 'doubao', 'mimo']);
+const SUPPORTED_KEYS = new Set(['doubao', 'mimo']);
 
 let cachedChain: TtsProvider[] | null = null;
 
@@ -34,7 +33,7 @@ export function resetTtsProviderChainCacheForTests(): void {
 
 function buildChain(): TtsProvider[] {
   const candidates = createCandidates();
-  const desiredOrder = parseChainConfig(env.TTS_PROVIDER_CHAIN) ?? ['mimo', 'edge'];
+  const desiredOrder = parseChainConfig(env.TTS_PROVIDER_CHAIN) ?? ['mimo'];
 
   const seen = new Set<string>();
   const ordered: TtsProvider[] = [];
@@ -66,15 +65,11 @@ function createCandidates(): Map<string, TtsProvider> {
     ),
   );
   map.set(
-    'edge',
-    createEdgeTtsProvider(env.TTS_DEFAULT_VOICE, env.TTS_TIMEOUT_MS),
-  );
-  map.set(
     'doubao',
     createDoubaoTtsProvider(
       env.DOUBAO_APP_ID ?? '',
       env.DOUBAO_ACCESS_TOKEN ?? '',
-      env.DOUBAO_VOICE ?? env.TTS_DEFAULT_VOICE,
+      env.DOUBAO_VOICE ?? env.MIMO_VOICE,
       env.TTS_TIMEOUT_MS,
     ),
   );

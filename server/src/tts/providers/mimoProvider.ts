@@ -57,12 +57,8 @@ export function createMimoTtsProvider(
         }
         voice = cloneVoiceCache;
       } else {
-        /*
-         * Edge 音色格式含 "Neural"，若上层传入的是 Edge 音色则忽略，
-         * 避免全局 TTS_DEFAULT_VOICE 仍指向 Edge 音色时 API 报错。
-         */
         const raw = input.voice?.trim() ?? '';
-        voice = raw && !raw.includes('Neural') ? raw : defaultVoice;
+        voice = raw || defaultVoice;
       }
 
       return synthesize(input, apiKey, voice, model, styleInstruction, timeoutMs);
@@ -144,12 +140,9 @@ async function synthesize(
   const base64 = json.choices?.[0]?.message?.audio?.data;
   if (!base64) throw new Error('mimo tts: empty audio data in response');
 
-  /* VoiceClone 模式下 voice 是 base64 URI，返回简短标识即可。 */
-  const returnedVoice = model === 'mimo-v2.5-tts-voiceclone' ? 'voiceclone' : voice;
-
   return {
     audio: Buffer.from(base64, 'base64'),
     mime: 'audio/wav',
-    voice: returnedVoice,
+    voice,
   };
 }
