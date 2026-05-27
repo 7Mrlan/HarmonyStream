@@ -1,7 +1,6 @@
 ---
 name: expo-deployment
 description: 打 Android APK / 发布、CI 配置、版本管理时触发。
-keywords: [eas, build, deploy, apk, release, ota]
 ---
 
 # Expo 打包与发布（Claudio 项目）

@@ -1,7 +1,6 @@
 ---
 name: expo-native-ui
 description: 使用 Expo SDK 原生 UI 模块（StatusBar、SafeArea、Image、Haptics、Blur）时触发。
-keywords: [expo, status-bar, safe-area, expo-image, haptics, blur]
 ---
 
 # Expo 原生 UI 速查（Claudio 项目）

@@ -1,7 +1,6 @@
 ---
 name: track-player-audio
 description: 实现音频播放、后台播放、锁屏控制、媒体通知时触发。
-keywords: [audio, player, background, lockscreen, notification, track-player]
 ---
 
 # 音频播放与后台控制（Claudio 项目）

@@ -1,7 +1,6 @@
 ---
 name: expo-tailwind-setup
 description: 配置或使用 NativeWind（Tailwind for RN）时触发。约束 className 用法和主题。
-keywords: [nativewind, tailwind, className, theme, tokens]
 ---
 
 # NativeWind 配置与用法（Claudio 项目）

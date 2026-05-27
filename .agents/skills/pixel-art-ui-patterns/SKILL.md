@@ -1,7 +1,6 @@
 ---
 name: pixel-art-ui-patterns
 description: 实现像素风组件、像素动画、点阵图标时触发。
-keywords: [pixel-art, retro, 8-bit, dot-matrix, scanline, crt]
 ---
 
 # 像素风 UI 实现模式（Claudio 项目）

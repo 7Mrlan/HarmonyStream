@@ -13,7 +13,7 @@ import { createHash } from 'node:crypto';
 import { env } from '../env.js';
 import { createMusicCache, type MusicCache } from '../music/cache.js';
 import { recordCacheHit, recordFallback } from '../music/metrics.js';
-import { deleteAudio, putAudio } from './audioStore.js';
+import { deleteAudio, getAudio, putAudio } from './audioStore.js';
 import { getTtsProviderChain } from './providerRegistry.js';
 
 export interface TtsRequest {
@@ -62,7 +62,8 @@ export async function synthesizeForChat(req: TtsRequest): Promise<TtsResolveResu
   const cachedId = idCache.get(cacheKey);
   if (cachedId) {
     recordCacheHit('tts');
-    return { id: cachedId, mime: 'audio/mpeg', providerId: 'cache' };
+    const cached = getAudio(cachedId);
+    return { id: cachedId, mime: cached?.mime ?? 'audio/mpeg', providerId: 'cache' };
   }
 
   const chain = getTtsProviderChain();

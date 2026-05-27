@@ -27,6 +27,7 @@ export interface GenerateDjResponseInput {
   currentTrack: Track | null;
   selectedTrack: Track;
   candidateTracks: Track[];
+  requestKind?: 'explicit' | 'genre' | 'generic' | 'multi';
 }
 
 export interface MusicIntent {
@@ -258,7 +259,9 @@ export async function generateDjResponse(
       return buildFailure(provider, startedAt, 'provider 响应缺少 content');
     }
 
-    const parsed = parseChatResponseJson(content, input.selectedTrack, input.candidateTracks);
+    const parsed = parseChatResponseJson(content, input.selectedTrack, input.candidateTracks, {
+      strict: input.requestKind === 'explicit',
+    });
     if (!parsed) {
       return buildFailure(provider, startedAt, 'provider 输出无法解析为 ChatResponse');
     }
@@ -347,6 +350,7 @@ function parseChatResponseJson(
   content: string,
   selectedTrack: Track,
   candidateTracks: Track[],
+  options: { strict?: boolean } = {},
 ): ChatResponse | null {
   const candidates = [
     content.trim(),
@@ -357,7 +361,7 @@ function parseChatResponseJson(
   for (const candidate of candidates) {
     try {
       const parsed = JSON.parse(candidate) as unknown;
-      const normalized = normalizeChatResponse(parsed, selectedTrack, candidateTracks);
+      const normalized = normalizeChatResponse(parsed, selectedTrack, candidateTracks, options);
       if (normalized) return normalized;
     } catch {
       /* 尝试下一个候选 JSON 片段 */
@@ -421,6 +425,7 @@ function normalizeChatResponse(
   value: unknown,
   selectedTrack: Track,
   candidateTracks: Track[],
+  options: { strict?: boolean } = {},
 ): ChatResponse | null {
   if (!isRecord(value)) return null;
 
@@ -428,6 +433,8 @@ function normalizeChatResponse(
   if (!say) return null;
 
   const play = normalizePlayList(value.play, selectedTrack, candidateTracks);
+  if (options.strict && !isReliableDjScript(say, selectedTrack)) return null;
+
   const reason = normalizeText(value.reason, 220);
   const segue = sanitizeDjText(normalizeText(value.segue, 160));
 
@@ -453,8 +460,20 @@ function sanitizeDjText(value: string | undefined): string | undefined {
     .replace(/把音量调小[^，。！？!?]*[，。！？!?]?/g, '')
     .replace(/调小音量[^，。！？!?]*[，。！？!?]?/g, '')
     .replace(/调低音量[^，。！？!?]*[，。！？!?]?/g, '')
+    .replace(/(?:系统|接口|模型|音源|provider|API|JSON)[^，。！？!?]*(?:不可用|失败|错误|返回|解析)[，。！？!?]?/gi, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/* 明确点歌的主播文案必须像口播，不能退化成按钮反馈。 */
+function isReliableDjScript(value: string, selectedTrack: Track): boolean {
+  const compact = value.replace(/\s+/g, '');
+  const title = selectedTrack.title.trim();
+  if (compact.length < 36) return false;
+  if (title && !compact.includes(title)) return false;
+  if (/^(?:安排|收到|好|行|来)[，。,.！!\s]*(?:先听|进歌|播放|给你放)/u.test(compact)) return false;
+
+  return /(?:人声|嗓音|鼓|低频|节奏|旋律|编曲|吉他|贝斯|钢琴|合成器|前奏|副歌|音色|空间|颗粒|律动|呼吸|胸口|肩膀|耳朵|身体|现场|制作|版本)/u.test(compact);
 }
 
 /*

@@ -88,9 +88,9 @@ export function buildTrackSwitchChatResponse(
 function buildSongIntro(title: string, artist?: string): string {
   const songName = artist ? `${artist}的《${title}》` : `《${title}》`;
   const templates = [
-    `收到，${songName}。别铺垫太多，先听它第一段怎么落下来。`,
-    `好，切 ${songName}。这首不用端着，开头一出来就知道路数。`,
-    `${songName}，安排。先听人声怎么站住，再决定要不要跟着走。`,
+    `收到，${songName}。这首别只当点歌反馈，先听它开头怎么把空间撑开；人声一站稳，整段情绪就会往里收。`,
+    `好，切 ${songName}。它不是靠大嗓门抓人，重点在节奏和旋律怎么一点点贴近耳朵，先让前奏把位置摆好。`,
+    `${songName}，安排。先别急着跳副歌，听人声怎么站住，再听后面的层次怎么慢慢压上来。`,
   ];
   return pickStableTemplate(templates, `${artist ?? ''}:${title}`);
 }

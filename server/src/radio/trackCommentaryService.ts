@@ -19,6 +19,7 @@ export interface TrackCommentaryMemory {
 export interface ScheduleTrackCommentaryInput {
   memory: TrackCommentaryMemory;
   track: Track;
+  previousTrack?: Track | null;
   cause: 'next' | 'previous';
   intent: RadioSessionIntent | null;
   currentModel: ModelInfo;
@@ -83,7 +84,7 @@ async function runTrackCommentary(
   trackKey: string,
   token: string,
 ): Promise<void> {
-  const { intent, memory, track, currentModel, cause } = input;
+  const { intent, memory, track, previousTrack, currentModel, cause } = input;
   if (!intent) return;
 
   try {
@@ -91,7 +92,7 @@ async function runTrackCommentary(
       userText: intent.userText,
       modelId: currentModel.id,
       modelDisplayName: currentModel.displayName,
-      currentTrack: null,
+      currentTrack: previousTrack ?? null,
       selectedTrack: track,
       cause,
     });

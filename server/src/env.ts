@@ -182,6 +182,11 @@ const EnvSchema = z.object({
   DOUBAO_APP_ID: OptionalEnvString,
   DOUBAO_ACCESS_TOKEN: OptionalEnvString,
   DOUBAO_VOICE: OptionalEnvString,
+  MIMO_API_KEY: OptionalEnvString,
+  MIMO_VOICE: envStringWithDefault('白桦'),
+  MIMO_MODEL: envStringWithDefault('mimo-v2.5-tts'),
+  MIMO_STYLE_INSTRUCTION: envStringWithDefault('语速平稳，播音腔，适合深夜电台'),
+  MIMO_VOICE_CLONE_FILE: OptionalEnvString,
 });
 
 /* 解析失败直接抛错，让进程立即停止 */

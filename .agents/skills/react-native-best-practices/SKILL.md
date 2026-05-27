@@ -1,10 +1,6 @@
 ---
 name: react-native-best-practices
 description: 写 React Native 组件、页面、Hook 时触发。约束 TS 类型、性能、可复用结构。
-trigger:
-  - "**/*.tsx"
-  - "**/*.ts"
-keywords: [react-native, expo, hook, component, performance]
 ---
 
 # React Native 最佳实践（Claudio 项目）

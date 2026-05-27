@@ -261,6 +261,7 @@ export function getQueueSnapshot(): Track[] {
  */
 function moveToQueueIndex(index: number, cause: 'next' | 'previous'): PlaybackMoveResponse {
   const track = radioState.queue[index] ?? null;
+  const previousTrack = radioState.currentTrack ? cloneTrack(radioState.currentTrack) : null;
 
   if (!track) {
     return buildPlaybackMoveFailure('queue exhausted');
@@ -274,7 +275,7 @@ function moveToQueueIndex(index: number, cause: 'next' | 'previous'): PlaybackMo
   const nextTrack = radioState.queue[radioState.currentIndex + 1] ?? null;
   if (nextTrack) schedulePreload(nextTrack);
   maybeRefillQueue(`playback-${cause}`);
-  scheduleTrackCommentary(radioState.currentTrack, cause);
+  scheduleTrackCommentary(radioState.currentTrack, cause, previousTrack);
 
   return {
     ok: true,
@@ -377,10 +378,11 @@ function getRemainingQueueCount(): number {
  * 调度切歌短播报。
  * 播报是附加体验：不阻塞切歌，不阻塞队列续推，任何失败都静默回退或丢弃。
  */
-function scheduleTrackCommentary(track: Track, cause: 'next' | 'previous'): void {
+function scheduleTrackCommentary(track: Track, cause: 'next' | 'previous', previousTrack?: Track | null): void {
   scheduleTrackCommentaryService({
     memory: radioState.trackCommentaryMemory,
     track,
+    previousTrack,
     cause,
     intent: radioState.activeIntent,
     currentModel: getCurrentModel(),

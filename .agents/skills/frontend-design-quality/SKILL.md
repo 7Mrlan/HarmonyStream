@@ -1,7 +1,6 @@
 ---
 name: frontend-design-quality
 description: UI 设计决策、布局检查、视觉层级评估时触发。对齐 Claudio "高级感像素风" 目标。
-keywords: [design, layout, hierarchy, contrast, spacing, typography]
 ---
 
 # 前端设计质量准则（Claudio 项目）

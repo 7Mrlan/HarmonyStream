@@ -1,7 +1,6 @@
 ---
 name: ui-polish
 description: UI 走查、微交互打磨、"看着可用但不够精致"时触发。
-keywords: [polish, micro-interaction, refinement, detail, finishing]
 ---
 
 # UI 打磨清单（Claudio 项目）

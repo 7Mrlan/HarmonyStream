@@ -9,10 +9,11 @@
 import { env } from '../env.js';
 import { createDoubaoTtsProvider } from './providers/doubaoProvider.js';
 import { createEdgeTtsProvider } from './providers/edgeProvider.js';
+import { createMimoTtsProvider } from './providers/mimoProvider.js';
 import type { TtsProvider } from './types.js';
 
 /* 受支持的 chain 关键字。 */
-const SUPPORTED_KEYS = new Set(['edge', 'doubao']);
+const SUPPORTED_KEYS = new Set(['edge', 'doubao', 'mimo']);
 
 let cachedChain: TtsProvider[] | null = null;
 
@@ -33,7 +34,7 @@ export function resetTtsProviderChainCacheForTests(): void {
 
 function buildChain(): TtsProvider[] {
   const candidates = createCandidates();
-  const desiredOrder = parseChainConfig(env.TTS_PROVIDER_CHAIN) ?? ['edge'];
+  const desiredOrder = parseChainConfig(env.TTS_PROVIDER_CHAIN) ?? ['mimo', 'edge'];
 
   const seen = new Set<string>();
   const ordered: TtsProvider[] = [];
@@ -53,6 +54,17 @@ function buildChain(): TtsProvider[] {
 /* 创建所有可能的 provider 实例，未启用的不会被挂入 chain。 */
 function createCandidates(): Map<string, TtsProvider> {
   const map = new Map<string, TtsProvider>();
+  map.set(
+    'mimo',
+    createMimoTtsProvider(
+      env.MIMO_API_KEY ?? '',
+      env.MIMO_VOICE,
+      env.MIMO_MODEL,
+      env.MIMO_STYLE_INSTRUCTION,
+      env.TTS_TIMEOUT_MS,
+      env.MIMO_VOICE_CLONE_FILE,
+    ),
+  );
   map.set(
     'edge',
     createEdgeTtsProvider(env.TTS_DEFAULT_VOICE, env.TTS_TIMEOUT_MS),

@@ -1,7 +1,6 @@
 ---
 name: ui-critique
 description: UI 自评、找问题、给改进意见时触发。直率但建设性。
-keywords: [critique, review, feedback, assessment, audit]
 ---
 
 # UI 自评指南（Claudio 项目）
