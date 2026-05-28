@@ -76,25 +76,11 @@
 
 ---
 
-## 当前任务 · 宠物阶段调研与方案审查
+## Phase Pet：⏸ 暂停 · 等待用户重启
 
-- [x] 尝试克隆并阅读 `xuemian168/qqpet_automation`；本地 SSH / HTTPS clone 失败，已改用 GitHub 源码页面提取参考事实。
-- [x] 核查当前 Claudio UI / 动画能力边界，标注代码出处。
-- [x] 写 Phase Pet 现状分析 Spec：只给证据和问题，不写实现代码。
-- [x] 用项目内审查规则自审方案：角色生命感、动作资产、状态机、性能、遮挡和失败退出。
-- [x] 使用 `vercel-react-best-practices` 与 `frontend-design` 审查现状分析，通过后继续写功能点与方案比较。
-- [x] 写 Phase Pet 功能点与方案比较：技术路线、推荐 prototype、文件级计划草案。
-- [x] 复核“是否真能达到灵动宠物生命感”，明确能做边界与不能靠代码硬凑的部分。
-- [x] 写 Phase Pet 风险与决策：最终技术路线、动作资产验收、性能验收、回滚条件。
-- [x] 自问是否需要用户素材 / 其他动画流 / 新技术配合；结论是第一轮不需要，改为 Skia 分层角色 rig 后开始编码。
-- [x] 实现 `PetCompanion` prototype：状态机、Skia 分层角色、拖拽/避让与主界面接入。
-- [x] 运行 typecheck / lint / test，并用 Expo Web bundle 验证可编译。
-- [x] 采纳外部评估：明确当前律动 / 嘴型是程序模拟，真实 FFT / TTS 包络留到后续；增强拖拽时头部、身体、手臂的拉扯变形。
-
-### Review
-
-- 用户已授权由我自行判断是否继续；第一轮不需要外部素材或新 runtime，按 `tasks/spec.md` §15 的 Skia 分层角色 rig 路线实现。
-- 新增 `packages/ui/src/PetCompanion.tsx`、`packages/ui/src/pet/petBrain.ts`、`packages/ui/src/pet/petTypes.ts`，并在 `apps/mobile/app/index.tsx` 接入贴边、可拖拽、可收起的宠物 prototype。
-- 验证通过：`pnpm typecheck`、`pnpm lint`、`pnpm test`、Expo Web bundle `http://localhost:8087/apps/mobile/index.ts.bundle?...` 返回 200。
-- 目标校正：QQ 宠物只作为生命感参考，当前目标是 Claudio 自己的灵动系统伴侣，不做 1:1 复刻。
-- 外部评估采纳：Skia 依赖已存在；当前没有真实音频 / TTS 包络，所以第一版只做程序化节奏，并已把该限制写入 Spec。
+- [x] 调研 QQ 宠物参考实现（`qqpet_automation`），提取可借鉴模式
+- [x] 技术路线比较（Skia / Rive / Lottie / WebView）→ 最终选定 Rive
+- [x] Skia 程序化 prototype 验证（已通过 typecheck/lint/test）→ 判定为废案，代码已删除
+- [x] Spec 重构：切换为 Rive 路线，移除硬性角色设定，标记暂停
+- [ ] 用户完成 Rive 角色动画资产（.riv 文件）
+- [ ] 用户通知重启 Phase Pet

@@ -235,146 +235,52 @@
 
 ---
 
-## 15. Phase Pet：Claudio 灵动系统伴侣
+## 15. Phase Pet：Claudio 灵动系统伴侣（⏸ 暂停 · 无限期待重启）
 
-> 目标不是 1:1 复刻 QQ 宠物；QQ 宠物只作为“角色生命感、情境动作和可玩性”的参考。Claudio 的宠物必须是属于电台产品自己的灵动系统伴侣。
+> **当前状态：用户设计角色资产中，编码未启动。重启条件：用户完成 Rive 角色动画资产（.riv 文件），通知恢复本 Phase。**
 
-### 15.1 插队原因与目标
+### 15.1 最终技术决策
 
-- 插队原因：用户明确要求先删除旧宠物方向后，重新评估能否做出有生命感、可互动、不会沦为贴图摆动的灵动系统伴侣。
-- 产品目标：宠物不是 DeepSeek / 模型标识，不是右下角贴图，也不是容器漂浮动画；它必须是一个有性格、有情境反应、能与电台状态互动的 Claudio 角色。
-- 技术目标：先证明动作资产、状态机、渲染性能、拖拽交互、遮挡避让和失败退出都可控，再决定是否进入 prototype。
+经过多轮评估与讨论（Skia 程序化 vs Rive 状态机），最终选定 **Rive 路线**：
 
-### 15.2 参考实现事实
+- **D1（主路线）**：Rive state machine runtime。角色动画在 Rive Editor 中制作（骨骼绑定 + 关键帧 + 状态机），导出 `.riv` 文件，React Native 侧通过 `@rive-app/react-native`（v2 / Nitro）或 `rive-react-native`（v1）加载并控制。
+- **D2（为什么不选 Skia 程序化）**：纯代码驱动的部件运动（sin 波浮动、缩放、旋转）只能产生「微动」，无法做出真正的角色动作（转身、弯腰、跳跃、被拖拽时的自然重心变化）。QQ 宠物级的生命感来自动画师调的关键帧，不是数学公式。
+- **D3（状态机分离）**：`petBrain.ts` 处理业务事件→目标状态（idle/listen/speak/sleep/drag）；Rive state machine 负责状态→动画表现。两层状态机通过 Rive inputs 通信。
+- **D4（角色不做硬性规定）**：角色设计由用户自行决定，在 Rive Editor 中完成。Spec 不限制角色形象、风格、色板或部件数量。
+- **D5（运行时依赖）**：`@rive-app/react-native`（v2）需 `react-native-nitro-modules >= 0.35.0`，支持 RN 0.78+ / Expo SDK 53+。本项目已满足版本要求。**不支持 Expo Go**，必须使用 dev build（项目已在使用）。
 
-- 本地 clone 状态：`git clone --depth 1 git@github.com:xuemian168/qqpet_automation.git .cache/reference/qqpet_automation` 失败，原因是 `Permission denied (publickey)`；HTTPS clone 也因无法连接 `github.com:443` 失败。当前参考证据来自 GitHub 源码页面，而不是本地工作区文件。
-- 参考仓库：`https://github.com/xuemian168/qqpet_automation`。仓库 README 将其描述为 QQ 宠物现代桌面移植，技术栈是 Electron + Ruffle + Flash/WASM，能力重点是桌面宠物显示、拖拽、右键菜单、托盘和离线本地运行。
-- 参考代码：`qq-pet-macos/main.js` 属于 Electron 主进程入口，职责是桌面窗口 / 托盘 / IPC 这类宿主能力；`qq-pet-macos/src/windows/app.html` 与 `qq-pet-macos/src/windows/main/index.js` 属于渲染窗口入口，围绕 Ruffle / Flash 资产运行原宠物表现。
-- 结论：该仓库证明这类宠物的高级感主要来自“动作资产 / 部件动画 + 状态/事件驱动 + 宿主交互”，不是来自普通 React 组件动画。它不能直接移植成 Expo React Native 宠物组件，但可以作为动作密度、状态反馈和拖拽反馈的参考；Claudio 不需要复制它的桌面宿主形态。
+### 15.2 资产工作流（用户侧）
 
-### 15.3 当前 Claudio 代码现状
+1. 在 Rive Editor（editor.rive.app 或桌面客户端）中绘制角色分层部件
+2. 绑定骨骼，制作关键帧动画（每个状态至少一个动画）
+3. 在 Rive 中配置 StateMachine，连线状态转换
+4. 导出 `.riv` 文件，放入 `apps/mobile/assets/rive/`
+5. 通知恢复 Phase Pet
 
-- 旧宠物代码已不存在：全仓搜索 `PixelPetSwitcher|petSprite|DEFAULT_PETS|onActionFeedback` 只命中 Spec / todo / 归档历史，`packages/ui/src/index.ts` 当前没有导出宠物组件。
-- 主界面当前只有电台核心 UI：`apps/mobile/app/index.tsx` / `HomeScreen` 在 `TopBar` 之后渲染时钟、On Air、日期、DJ 气泡、频谱和播放区；`TopBar` 位于 `apps/mobile/app/index.tsx:473`，`MusicSpectrum` 位于 `apps/mobile/app/index.tsx:509`。
-- 当前可用动画地基：`packages/ui/src/MusicSpectrum.tsx` / `getSkiaModule`、`NativeMusicSpectrum`、`WebMusicSpectrum` 已形成 Native 用 Skia、Web 用 canvas fallback 的模式；`packages/ui/src/RadioTuningLoader.tsx` / `getSkiaModule` 也使用同类模式。
-- 当前可用交互地基：`apps/mobile/app/_layout.tsx` / `RootLayout` 已用 `GestureHandlerRootView` 包住全局；`packages/ui/src/PlaybackProgressBar.tsx` / `PlaybackProgressBar` 已用 `Gesture.Pan` 与 `GestureDetector` 做拖拽交互。
-- 当前依赖能力：`apps/mobile/package.json` 与 `packages/ui/package.json` 已包含 `@shopify/react-native-skia`、`react-native-reanimated`、`react-native-gesture-handler`；没有现成 Rive / Lottie / Spine runtime 依赖。
+### 15.3 重启后的文件级计划
 
-### 15.4 方案自审结论
+- `packages/ui/src/pet/petTypes.ts`：`PetState`、`PetEvent` 纯类型定义
+- `packages/ui/src/pet/petBrain.ts`：纯状态机，电台事件→目标状态，不碰 UI
+- `packages/ui/src/PetCompanion.tsx`：Rive 组件加载 + 手势（拖拽）+ 避让 + 收起
+- `packages/ui/src/index.ts`：达到准入标准后导出 `PetCompanion`
+- `apps/mobile/app/index.tsx`：可关闭 / 可回滚的 prototype 开关挂载
 
-- 致命问题：如果只做“SVG 或图片 + 外层 translate / rotate / scale”，会再次变成旧废案，直接违反 §2.1 角色 / 宠物动画准入规则。
-- 严重问题：没有动作资产生产线时，不应承诺 QQ 宠物级表现。工程可以完成状态机和渲染，但角色生命感依赖可复用动作资产：帧图、分层部件、骨骼动画或等价动画数据。
-- 严重问题：直接把 `qqpet_automation` 的 Electron / Ruffle / Flash 路线搬进 Expo React Native 不合理；桌面透明窗口、托盘、Flash 运行时和许可边界都与当前 App 主线冲突。
-- 一般问题：本地 clone 尚未成功，后续如果必须做更深层代码对照，需要先解决 SSH key 或网络访问；在此之前不能把“已经加入工作区”写成完成事实。
-- 建议方向：下一段功能点必须先比较 Skia sprite atlas、分层骨骼/部件动画、Rive/Lottie/Spine runtime、WebView/Ruffle 四类路线，并以“能否产生角色本体动作”和“能否低风险接入 Expo”为首要标准。
+### 15.4 最低状态集
 
-### 15.5 当前准入判断
+`idle` | `look` | `listen` | `speak` | `sleep` | `drag`。六状态必须肉眼一眼可区分。
 
-- 可以继续评估：当前项目已有 Skia、Reanimated、Gesture Handler，足够支撑高质量 in-app 宠物 prototype 的工程层。
-- 不能直接编码：还没有确认动作资产路线、角色设计方向、状态机范围和验收截图标准；提前写代码会高概率变成又一个贴图动画。
-- 下一段交付物：功能点与方案比较，包括推荐路线、弃用路线、文件级计划、动作资产格式、状态机事件表、遮挡避让规则和 prototype 删除条件。
+- 情境映射：音乐播放→`listen`；TTS 播报→`speak`；用户交互→`look`；空闲超时→`sleep`；拖拽中→`drag`
+- 遮挡策略：默认贴边，避让输入框/播放控制/封面；拖拽释放吸附安全边；有收起入口
 
----
+### 15.5 回滚条件
 
-### 15.6 Skill 审查结果
+六状态不可分、拖拽生硬、遮挡核心控件、性能影响主流程，任一命中即删除 prototype。
 
-- `vercel-react-best-practices` 审查结论：有条件通过。后续实现必须避免用 React state 承载逐帧动画；动画帧、拖拽坐标、眼神跟随、播放律动等高频值必须走 Skia / Reanimated shared value / worklet。新运行时依赖必须按需、可分析、可回退，不能为了宠物无条件扩大 Metro / Web bundle。
-- `frontend-design` 审查结论：有条件通过。角色必须有明确概念与视觉记忆点，不能沿用通用可爱贴图、模型 logo、漂浮徽章或 AI 生成感模板。第一版也必须有角色轮廓、表情语言、动作节奏和 Claudio 电台气质。
-- 本轮未使用 `web-design-guidelines`：它面向 Web UI / 可访问性审查；当前阶段是 React Native 宠物方案 Spec，不是已实现 Web 页面审查。
-- 审查准入：现状分析通过，可以继续进入“功能点与方案比较”；但编码 HARD-GATE 仍未解除。
+### 15.6 历史摘要
 
-### 15.7 技术路线比较
-
-| 路线 | 生命感潜力 | 接入风险 | 审查结论 |
-| --- | --- | --- | --- |
-| Skia sprite atlas + manifest | 高。预制帧图能直接做身体、眼睛、嘴、姿态变化，最接近 QQ 宠物的帧动画本质。 | 低。项目已有 Skia / Reanimated / Gesture Handler，能沿用 `MusicSpectrum` 的 Native Skia + Web fallback 模式。 | 推荐作为 prototype 主路线。 |
-| Skia 分层部件 rig | 高。头、眼、嘴、手脚可按状态独立插值，适合做眼神、张嘴、拖拽挣扎等微反应。 | 中。需要设计锚点、层级和部件拆分，调参成本高。 | 推荐作为 sprite atlas 的增强层，不作为第一步唯一方案。 |
-| Rive state machine runtime | 很高。Rive 原生支持 artboard、state machine、data binding，适合复杂角色。 | 中高。官方 React Native runtime 需要 RN 0.78+、Expo SDK 53+、Nitro Modules；本项目版本满足大方向，但会新增 native runtime 与构建风险。 | 作为 P1 候选；只有当我们能产出 `.riv` 资产且接受 native 依赖时再引入。 |
-| Lottie / Skottie clips | 中。适合播放预制片段，但交互状态、拖拽反馈和局部表情控制不如 Rive / 自研 rig。 | 中。Lottie 是独立 runtime；Skottie 可借 Skia 但仍依赖高质量 AE/Lottie 资产。 | 可作为一次性过场或表情片段，不作为宠物主架构。 |
-| RN `<Image>` / `expo-image` 快速换帧 | 低到中。能做帧图，但高频换帧容易回到 React 渲染热路径，也难做部件交互。 | 中。实现简单但质量天花板低。 | 不作为主路线；静态 artwork 继续保持现状，不迁移宠物动画到普通 Image。 |
-| WebView / Ruffle / Flash | 理论上能复刻原味 QQ 宠物。 | 高。与 Expo RN、移动端交互、许可、体积和桌面宿主边界冲突。 | 拒绝作为本项目路线，只作参考研究。 |
-
-外部参考：
-- React Native Skia Atlas：`https://shopify.github.io/react-native-skia/docs/shapes/atlas/`
-- React Native Skia Images：`https://shopify.github.io/react-native-skia/docs/images/`
-- Rive React Native runtime：`https://rive.app/docs/runtimes/react-native/react-native`
-- Expo Lottie 文档：`https://docs.expo.dev/versions/v53.0.0/sdk/lottie/`
-- Expo New Architecture：`https://docs.expo.dev/guides/new-architecture/`
-
-### 15.8 推荐 prototype 功能点
-
-- 角色方向：Claudio 的“电台守夜员”系统伴侣。它不是动物贴纸，也不是模型品牌图标；核心记忆点是小型电台人格、耳机 / 天线 / 信号眼、黑底霓虹边缘、轻微刺绣或高密度手绘质感。
-- 资产标准：第一版使用高密度 raster sprite atlas，源尺寸按 2x / 3x 绘制，运行时显示约 `96dp - 128dp`；禁止低分辨率像素块直接放大。每个动作 clip 至少 8 帧，关键状态不少于 6 个 clip。
-- 最低状态：`idle`、`look`、`listen`、`speak`、`sleep`、`drag`。每个状态必须出现角色本体变化，且截图静态也能看出差异。
-- 情境映射：TTS 播报时进入 `speak`；音乐播放且非 TTS 时进入 `listen`；输入聚焦或用户靠近时进入 `look`；长时间无操作进入 `sleep`；拖拽时进入 `drag`；切歌成功可短暂进入 `react`。
-- 遮挡策略：默认贴边停靠，保留输入框、播放控制、封面 / 海报主视觉安全区；拖到危险区域时吸附到最近安全边；需要提供关闭或收起入口。
-- 性能策略：React state 只保存低频业务状态；帧索引、拖拽位置、眨眼节奏、身体摆动走 shared value / worklet；Skia Native 渲染，Web 使用单 canvas 或低频 fallback。
-- 失败退出：prototype 若达不到“六状态一眼可分辨、无明显遮挡、拖拽自然、稳定 30fps+、不引入不可控依赖”，必须删除，不进入主界面。
-
-### 15.9 文件级计划草案
-
-- `packages/ui/src/pet/petTypes.ts`：定义 `PetState`、`PetClip`、`PetFrame`、`PetEvent`、`PetSafeArea` 等纯类型。
-- `packages/ui/src/pet/petBrain.ts`：纯状态机，只根据电台 / TTS / 输入 / 拖拽 / 空闲事件输出目标状态，不碰 UI。
-- `packages/ui/src/pet/petManifest.ts`：描述 atlas、clip、frame rect、anchor、hitbox、fps、loop 策略。
-- `packages/ui/src/pet/PetSpriteCanvas.tsx`：Skia 渲染层，按 manifest 绘制当前帧；Web fallback 只保留 prototype 可验收能力。
-- `packages/ui/src/PetCompanion.tsx`：对外组件，负责状态机、手势、避让、收起和渲染组合。
-- `packages/ui/src/index.ts`：仅在 prototype 达到准入标准后导出 `PetCompanion`。
-- `apps/mobile/app/index.tsx`：仅在用户确认后接入主界面，并且先用可关闭 / 可回滚的 prototype 开关挂载。
-
-### 15.10 下一段待确认
-
-- 本段是“功能点与方案比较”。用户确认后，下一段补“风险与决策”：资产生成方式、是否引入 Rive、clone 失败处理、验收截图标准、测试命令和回滚条件。
-
----
-
-### 15.11 能力复核：能否做到灵动宠物生动感
-
-- 结论：可以继续，但目标必须定义为“Claudio in-app 系统伴侣拥有自己的生命感”，不是 1:1 复刻桌面透明窗口、托盘、Flash 运行时和原版权资产。
-- 能做到的部分：角色本体动作、状态切换、拖拽反应、闲置反应、听歌 / 说话 / 睡觉情境、局部表情变化、贴边避让和可关闭入口。
-- 不能靠代码硬凑的部分：没有高质量动作资产时，任何渲染技术都会退化成贴图晃动；因此动作资产验收必须放在实现验收之前。
-- 技术判断：2026 年的高性能技术不是越多越好，而是选能稳定产出和验证的路线。当前最优路线是 Skia 分层角色 rig + manifest + worklet 状态驱动；Rive 作为后续增强候选，不作为第一版硬依赖。
-
-### 15.12 最终技术决策
-
-- D1：第一版采用“Skia 分层角色 rig + manifest + worklet 状态驱动”的主路线，不等待用户提供素材。原因是灵动宠物的生动感本质依赖角色本体部件变化；Skia 分层绘制能模拟 Flash 式矢量角色动画，避免 React 逐帧渲染热路径，并且项目已具备 Skia / Reanimated / Gesture Handler 依赖。
-- D2：状态机与渲染分离。`petBrain.ts` 只处理业务事件到目标状态的转换，`PetCompanion.tsx` 内的绘制层只处理当前状态 / shared value / Skia 部件绘制，避免把业务规则和绘制参数揉成不可维护逻辑。
-- D3：角色动画采用“分层部件 + 局部微反应”混合。身体、头、耳机、天线、眼睛、嘴、信号灯、电台波形分层绘制；不同状态改变部件锚点、表情、嘴型、重心和节奏，保证角色本体在动。
-- D4：不在第一版引入 Rive。Rive 的 React Native runtime 很适合 state machine 角色动画，但需要 `.riv` 资产生产线与 native runtime 接入；在没有可靠 `.riv` 资产前引入会增加构建风险，并不自动提升角色表现。
-- D5：不使用 RN `<Image>` / `expo-image` 承载宠物动画。普通 Image 适合静态封面或低频图片展示，不适合宠物帧索引、拖拽、高频表情和局部反应。
-- D6：不使用 WebView / Ruffle / Flash。该路线更接近原 QQ 宠物宿主，但与 Expo 移动端、体积、交互和许可边界冲突。
-- D7：`@shopify/react-native-skia` 已存在于 `apps/mobile/package.json` 与 `packages/ui/package.json`，宠物第一版不新增绘图 runtime。
-- D8：第一版 `listen` / `speak` 使用程序化节奏模拟音乐律动和嘴型，不假装是真实 FFT / TTS 包络。真实音频频谱与 TTS 音量包络留到 Phase N 或后续 audio envelope 子阶段，接入前不把当前模拟效果描述为音频同步。
-
-### 15.13 动作资产生产与验收
-
-- 第一版角色名暂定为 Claudio Signal Keeper。视觉关键词：黑底电台、耳机、天线、信号眼、霓虹边缘、高密度手绘 / 刺绣质感；不能像通用动物贴纸。
-- 资产生产方式：第一版不依赖外部用户素材，先用 Skia 代码绘制同一角色的分层部件；后续如需要商业级美术，再把同一 manifest 替换为 raster atlas 或 Rive 资产。
-- 第一版最小状态：`idle`、`look`、`listen`、`speak`、`sleep`、`drag`。`speak` 至少包含嘴型变化；`drag` 至少包含身体被拉起或重心变化；`sleep` 至少包含眼睛 / 姿态变化；`listen` 至少包含听歌点头或信号律动。
-- 质量门槛：静态截图里六个状态必须一眼可分；连续播放时角色本体必须在动；只有位置漂移、缩放、旋转、阴影变化不算通过。
-- 资产失败处理：若 Skia 角色显得简陋、表情不可读或过度像图标，先迭代角色绘制，不继续扩展主界面功能。
-- 分层拆解：头、身体、耳机、天线、眼睛、嘴、胸口信号柱、手臂、脚座必须作为不同部件处理；拖拽至少影响头部偏移、身体重心和手臂长度，避免只有整图移动。
-
-### 15.14 性能与交互验收
-
-- 渲染热路径：帧索引、眨眼、拖拽坐标、局部 overlay 参数必须在 shared value / worklet / Skia 层处理；React state 只记录低频业务状态和开关。
-- 交互验收：拖拽必须跟手，释放后吸附安全边；输入框、播放控制、封面 / 海报主视觉是硬安全区，不允许默认遮挡。
-- 行为验收：音乐播放时进入 `listen`；TTS 播报时进入 `speak`；用户输入聚焦或最近交互进入 `look`；空闲超时进入 `sleep`；拖拽中进入 `drag`。
-- 数据源验收：当前版本的胸口律动和嘴型是程序模拟；必须在 UI 或文案中避免暗示“真实音频驱动”。后续真实同步需要先打通音频分析或 TTS 包络数据源。
-- 性能验收：Web prototype 需要肉眼稳定，Native 目标稳定 30fps+；任何因宠物导致输入卡顿、频谱掉帧或播放器控制延迟的实现都必须回滚。
-- 测试验收：至少新增 `petBrain` 纯函数单元测试、manifest 校验测试、`pnpm typecheck`；接入主界面后补 `pnpm lint` 与 Expo Web 截图验收。
-
-### 15.15 风险与回滚
-
-- R1：最大风险是角色资产质量，不是动画代码。缓解：先验收 reference 和 atlas，再接入主界面。
-- R2：本地 clone `qqpet_automation` 失败导致参考深度受限。缓解：继续使用 GitHub 页面作为参考；如后续必须深挖代码，再单独修 SSH / 网络。
-- R3：宠物遮挡电台主流程。缓解：默认贴边、可收起、可关闭，且安全区规则写入组件。
-- R4：依赖膨胀。缓解：第一版不新增 native runtime；只使用现有 Skia / Reanimated / Gesture Handler。
-- 回滚条件：六状态不可分、资产像贴图、拖拽生硬、遮挡核心控件、性能影响主流程、需要大规模引入不可控依赖，任一命中即删除 prototype，不进入主界面。
-
-### 15.16 编码 HARD-GATE
-
-- 本阶段 Spec 到这里才算完整：现状分析、skill 审查、技术路线、功能点、风险决策和验收标准已齐。
-- 用户确认完整 Spec 后，才能创建 `packages/ui/src/pet/*` 和 `PetCompanion.tsx`。
-- 第一轮编码只做 Skia 分层角色 prototype，不改服务端契约，不改模型切换逻辑，不引入 Rive / Lottie / WebView / Ruffle，不要求用户提供素材。
+- 评估了 Skia sprite atlas / 分层部件 rig / Rive / Lottie / WebView(Ruffle) 五类路线
+- Skia 程序化 prototype 已实现并验证 typecheck/lint/test 可通过，但因「只有微动没有真动作」被判定为废案，代码已删除
+- 用户确认走 Rive 路线，自行在 Rive Editor 中制作角色动画
+- 参考：`qqpet_automation`（Electron + Flash/WASM）——仅作生命感参考，不移植
 
 ---
