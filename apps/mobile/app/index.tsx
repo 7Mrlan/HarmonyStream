@@ -40,12 +40,17 @@ import {
   TopBar,
   TrackArtworkPanel,
   UserBubble,
+  type MusicSpectrumMode,
 } from '@claudio/ui';
 import { getApiBaseUrl } from './_config/api';
 import { useNowPlayingMedia } from './_hooks/useNowPlayingMedia';
 import { useRadioPlayer, type RadioTrack } from './_hooks/useRadioPlayer';
 import { useStationController } from './_hooks/useStationController';
 import { useTtsPlayer } from './_hooks/useTtsPlayer';
+import {
+  deriveClaudioLifeState,
+  type ClaudioLifeState,
+} from './_utils/claudioLifeState';
 import { mapApiTrackToRadioTrack, mapApiTracksToRadioTracks } from './_utils/trackMapping';
 
 /* DJ 默认文案：服务端未接入前的首屏提示，不再作为业务响应来源 */
@@ -69,6 +74,14 @@ interface UserMessage {
   time: string;
 }
 
+interface ClaudioLifeVisualState {
+  onAirOnline: boolean;
+  onAirLabel: string;
+  nowState: string;
+  avatarColor: string;
+  spectrumMode: MusicSpectrumMode;
+}
+
 const DEFAULT_PLAYBACK_CAPABILITIES: PlaybackCapabilities = {
   canPrevious: false,
   canNext: false,
@@ -76,6 +89,70 @@ const DEFAULT_PLAYBACK_CAPABILITIES: PlaybackCapabilities = {
   currentIndex: 0,
   canAutoRefill: false,
 };
+
+/*
+ * Claudio 生命状态到 UI primitive props 的穷尽映射。
+ * 新增生命状态时 TypeScript 会要求这里同步补齐展示语义。
+ */
+const CLAUDIO_LIFE_VISUALS = {
+  offline: {
+    onAirOnline: false,
+    onAirLabel: 'OFFLINE',
+    nowState: 'OFFLINE',
+    avatarColor: '#121212',
+    spectrumMode: 'off',
+  },
+  connecting: {
+    onAirOnline: true,
+    onAirLabel: 'LINKING',
+    nowState: 'CONNECTING',
+    avatarColor: '#111827',
+    spectrumMode: 'idle',
+  },
+  tuning: {
+    onAirOnline: true,
+    onAirLabel: 'TUNING',
+    nowState: 'TUNING',
+    avatarColor: '#001a0f',
+    spectrumMode: 'medium',
+  },
+  speaking: {
+    onAirOnline: true,
+    onAirLabel: 'VOICE',
+    nowState: 'VOICE',
+    avatarColor: '#10251b',
+    spectrumMode: 'low',
+  },
+  listening: {
+    onAirOnline: true,
+    onAirLabel: 'ON AIR',
+    nowState: 'PLAYING',
+    avatarColor: '#0a0a0a',
+    spectrumMode: 'high',
+  },
+  sleeping: {
+    onAirOnline: true,
+    onAirLabel: 'SLEEP',
+    nowState: 'SLEEPING',
+    avatarColor: '#080808',
+    spectrumMode: 'asleep',
+  },
+  breathing: {
+    onAirOnline: true,
+    onAirLabel: 'STANDBY',
+    nowState: 'STANDBY',
+    avatarColor: '#0a0a0a',
+    spectrumMode: 'idle',
+  },
+} satisfies Record<ClaudioLifeState, ClaudioLifeVisualState>;
+
+/*
+ * 把 Claudio 生命状态映射成 UI primitive props。
+ * UI 包不理解移动端业务状态，只接收展示文案、颜色和频谱强度。
+ */
+function getClaudioLifeVisualState(state: ClaudioLifeState): ClaudioLifeVisualState {
+  return CLAUDIO_LIFE_VISUALS[state];
+}
 
 /*
  * 生成当前 UI 时间戳。
@@ -264,6 +341,21 @@ export default function HomeScreen() {
     setPlaybackCapabilities,
   });
   const { playVoice } = station;
+  /*
+   * Claudio 生命状态只在 HomeScreen 聚合一次。
+   * 它只驱动 UI 展示，不反向控制播放器、语音或网络。
+   */
+  const claudioLifeState = deriveClaudioLifeState({
+    connectionState,
+    djLoading,
+    chatSending,
+    voiceSpeaking: tts.playing,
+    musicDucked: station.musicDucked,
+    listening: animationActive,
+    stationPaused,
+    stationPlaying: station.stationPlaying,
+  });
+  const claudioLifeVisual = getClaudioLifeVisualState(claudioLifeState);
 
   /*
    * 同一首歌只触发一次预热：用 ref 记录已经发起预热的 track url。
@@ -510,7 +602,10 @@ export default function HomeScreen() {
               </>
             )}
             <View className="mt-3">
-              <OnAirIndicator />
+              <OnAirIndicator
+                online={claudioLifeVisual.onAirOnline}
+                label={claudioLifeVisual.onAirLabel}
+              />
             </View>
           </View>
 
@@ -519,12 +614,19 @@ export default function HomeScreen() {
             title={radio.track.title}
             artist={radio.track.artist}
             playing={radio.playing}
-            state={radio.error ? 'ERROR' : radio.buffering ? 'BUFFERING' : undefined}
+            state={
+              radio.error ? 'ERROR' : radio.buffering ? 'BUFFERING' : claudioLifeVisual.nowState
+            }
           />
 
           {/* 律动主视觉：用户原版 48 根霓虹频谱条，跟随真实播放状态律动 */}
           <View className="px-4 pt-2 pb-3">
-            <MusicSpectrum active={animationActive} ended={radio.ended} height={200} />
+            <MusicSpectrum
+              active={animationActive}
+              mode={claudioLifeVisual.spectrumMode}
+              ended={radio.ended}
+              height={200}
+            />
           </View>
 
           {/* Reanimated 播放进度条：位于频谱与控件之间，拖动结束后再提交真实 seek */}
@@ -561,6 +663,7 @@ export default function HomeScreen() {
             loading={djLoading}
             voiceActive={ttsEnabled}
             voiceDisabled={chatSending}
+            avatarColor={claudioLifeVisual.avatarColor}
             onVoiceToggle={station.toggleVoiceEnabled}
             onReplay={station.replayVoice}
           />

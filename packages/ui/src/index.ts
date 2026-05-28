@@ -21,7 +21,7 @@ export { DotMatrixBackground } from './DotMatrixBackground';
 export type { DotMatrixBackgroundProps } from './DotMatrixBackground';
 
 export { MusicSpectrum } from './MusicSpectrum';
-export type { MusicSpectrumProps } from './MusicSpectrum';
+export type { MusicSpectrumMode, MusicSpectrumProps } from './MusicSpectrum';
 
 export { NowPlayingBar } from './NowPlayingBar';
 export type { NowPlayingBarProps } from './NowPlayingBar';

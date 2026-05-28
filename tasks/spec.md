@@ -8,10 +8,10 @@
 
 ## 当前活跃索引
 
-- 当前主线：AI 电台已完成 Phase L.2 测试整理 + Resident DJ 并行多智能体升级；下一阶段待确认。
+- 当前主线：AI 电台已完成 Phase L.3 Claudio Life State Bus；下一阶段待确认。
 - 已完成：Phase A 后端 API 骨架；Phase B 移动端接入；Phase C LLM 主播；Phase C+ 等待体验；Phase D 音乐来源；Phase D.5 性能地基；Phase E TTS 入声；Phase F.0 SDK 56 依赖升级；Phase F.A 音频会话/后台权限；Phase F.B WS 心跳/重连；Phase F.C 锁屏 metadata 代码接线；Phase F.D APK 构建入口；Phase F.E 服务端 graceful shutdown；Phase J 队列与推荐体验收口；Phase J.1 radioState 编排拆分；Phase J.2 chatTurnPlanner 抽离；Phase J.3 自动化测试入口；Phase L.0 个人音乐记忆与 Context Engine。
-- 当前阶段：Phase L.2 已完成并归档；当前没有新的实现阶段获得确认。
-- 当前 HARD-GATE：下一阶段如果进入移动端导入 UI、自动学习落盘或宠物实现，仍需重新写当前现状与文件级计划。
+- 当前阶段：Phase L.3 已完成并归档；当前没有新的实现阶段获得确认。
+- 当前 HARD-GATE：下一阶段如果进入移动端导入 UI、自动学习落盘、宠物实现或真实 FFT，仍需重新写当前现状与文件级计划。
 - 当前边界：BYO-LLM 用户自配 key/baseUrl/model 单独作为 Phase F.5，不混入 Phase F 锁屏 / APK 验收。
 
 ---
@@ -173,6 +173,7 @@
 | Phase L.0   | 完成 | 服务端个人资料层、个人候选检索、Context Assembler、DJ prompt 上下文、MiMo 动态 style TTS 已落地；完整历史见 `tasks/spec/phase-l0-personal-context-engine.md`。 |
 | Phase L.1   | 完成 | Resident DJ 服务端闭环已落地：简单歌单、隐式学习文件读取、curated candidates、深聊边播和 Critic；完整历史见 `tasks/spec/phase-l1-resident-dj-agent.md`。       |
 | Phase L.2   | 完成 | L.1 测试夹具已整理，Resident DJ 异步 orchestrator 与多 seed 有限并发解析已落地；完整历史见 `tasks/spec/phase-l2-resident-dj-parallel-agents.md`。              |
+| Phase L.3   | 完成 | 移动端本地 Life State Bus、频谱 mode、OnAir/NowPlaying/DJBubble 映射和移动端 Vitest 已落地；完整历史见 `tasks/spec/phase-l3-claudio-life-state-bus.md`。        |
 
 ---
 
@@ -421,3 +422,13 @@
 - 已完成：多 seed 音乐解析默认并发 2，单 seed 内 provider chain 顺序不变，并增加去重提交纯函数。
 - 验收证据：`pnpm test` 通过；`pnpm test:full` 通过；server 11 个测试文件 / 43 个测试通过。
 - 完整归档：`tasks/spec/phase-l2-resident-dj-parallel-agents.md`。
+
+---
+
+## 19. Phase L.3：Claudio Life State Bus（已归档）
+
+- 已完成：移动端本地 `deriveClaudioLifeState()`，统一 `offline / connecting / tuning / speaking / listening / sleeping / breathing` 展示态。
+- 已完成：`HomeScreen` 作为唯一聚合点，把生命状态映射成 OnAir、NowPlaying、DJBubble、MusicSpectrum 的 primitive props。
+- 已完成：`MusicSpectrum` 新增展示强度 `mode`，Native Skia 与 Web canvas 共用同一套 mode 强度语义，并保留 `active` 兼容旧调用。
+- 验收证据：`pnpm test` 通过；全仓 typecheck、移动端 1 个测试文件 / 7 个测试、server 11 个测试文件 / 43 个测试通过。
+- 完整归档：`tasks/spec/phase-l3-claudio-life-state-bus.md`。

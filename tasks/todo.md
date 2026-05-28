@@ -14,7 +14,7 @@
 - 涉及 `packages/*` 后，如果页面没变，先按 Metro / 浏览器缓存陷阱排查。
 - 所有“运行 / 重启 / 打开 / 点击”步骤必须标明执行载体。
 - Claudio 永远是音乐电台：评论区 / 对话输入是点歌和推荐入口，不新增独立搜索框；LLM 主播负责理解意图、策划选曲、讲短背景和过渡。
-- Claudio 的核心不是通用点歌和短文案，而是个人音乐记忆驱动的 AI 电台；Phase L.2 测试整理 + Resident DJ 并行多智能体升级已完成。
+- Claudio 的核心不是通用点歌和短文案，而是个人音乐记忆驱动的 AI 电台；Phase L.3 Life State Bus 已完成。
 - GitHub 侧 Phase Pet 当前是设计草案和注释占位，`PetCompanion` 组件尚未实际存在；不能当作已完成 prototype。
 - 默认音乐源使用已验证的 LX-compatible 链路：huibq 源 raw URL + Kuwo 候选搜索；用户仍可通过 env 配置覆盖源脚本或候选 resolver。
 
@@ -41,6 +41,7 @@
 - [x] Phase L.0：个人音乐记忆与 Context Engine
 - [x] Phase L.1：Resident DJ Agent 服务端闭环
 - [x] Phase L.2：测试整理 + Resident DJ 并行多智能体升级
+- [x] Phase L.3：Claudio Life State Bus
 - [ ] Phase M：用户音源导入 UI
 - [ ] Phase Pet：Claudio 灵动系统伴侣 prototype（GitHub 侧已合入设计草案，代码未实装）
 - [ ] Phase K：歌曲像素海报
@@ -200,3 +201,23 @@
 - 验证：终端命令 `pnpm test` 通过；typecheck 全部通过，server 11 个测试文件 / 43 个测试通过。
 - 验证：终端命令 `pnpm test:full` 通过；server build、结构烟测和强制无曲目分支均通过。
 - 遗留：自动学习事件落盘、移动端导入 UI、重 CPU 大歌库分析 worker 留到后续阶段。
+
+## 当前任务 · Phase L.3 Claudio Life State Bus
+
+- [x] 完成分段 Spec：现状分析、功能点与文件级计划、风险与决策。
+- [x] 按用户要求使用审查 AI 复核 Phase L.3 方案，并采纳移动端本地 pure util、UI primitive props、移动端 Vitest 等修正。
+- [x] 写入 `tasks/spec.md` 当前阶段真源：Life State 本地展示态、优先级、包边界、MusicSpectrum mode、验证边界。
+- [x] 新增 `apps/mobile/app/_utils/claudioLifeState.ts` 和纯函数测试。
+- [x] 新增移动端 Vitest 配置与测试脚本，并把根 `pnpm test` 纳入移动端纯函数测试。
+- [x] 在 `HomeScreen` 聚合一次 `claudioLifeState`，并映射到 OnAir / NowPlaying / DJBubble / MusicSpectrum。
+- [x] 给 `MusicSpectrum` 增加展示强度 `mode`，Native/Web 两端共享同一套强度映射，保留 `active` 兼容。
+- [x] 终端命令：运行 `pnpm test` 并修复失败。
+- [x] 阶段验收通过后归档 Phase L.3 Spec。
+
+### Phase L.3 Review
+
+- 结果：移动端新增本地 Life State Bus，Claudio 现在能统一呈现离线、连接、调频、说话、听歌、睡眠和待机呼吸状态。
+- 结果：`MusicSpectrum` 新增展示强度 `mode`，Native/Web 均通过同一套模式强度表达生命状态，仍保留 `active` 兼容。
+- 结果：根 `pnpm test` 已纳入移动端纯函数测试，不渲染 React Native 组件，避免 Expo/RN 测试噪音。
+- 验证：终端命令 `pnpm test` 通过；全仓 typecheck、移动端 1 个测试文件 / 7 个测试、server 11 个测试文件 / 43 个测试通过。
+- 遗留：真实 FFT / audio envelope、`PetCompanion`、服务端长期记忆接入均留到后续独立阶段。

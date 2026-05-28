@@ -11,6 +11,7 @@
     "prebuild": "expo prebuild",
     "build:apk": "eas build -p android --profile preview --local",
     "build:apk:cloud": "eas build -p android --profile preview",
+    "test": "vitest run",
     "typecheck": "pnpm exec tsc --noEmit",
     "lint": "pnpm exec eslint . --ext .ts,.tsx"
   },
@@ -48,6 +49,7 @@
     "@types/react": "~19.2.0",
     "eas-cli": "19.0.8",
     "react-native-worklets": "0.8.3",
-    "typescript": "~6.0.3"
+    "typescript": "~6.0.3",
+    "vitest": "^4.1.7"
   }
 }
