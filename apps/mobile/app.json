@@ -17,22 +17,29 @@
       "adaptiveIcon": {
         "backgroundColor": "#000000"
       },
+      "softwareKeyboardLayoutMode": "resize",
       "permissions": [
         "INTERNET",
-        "WAKE_LOCK"
+        "WAKE_LOCK",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ]
     },
     "ios": {
       "bundleIdentifier": "fm.claudio.app",
       "supportsTablet": false,
       "infoPlist": {
-        "UIBackgroundModes": ["audio"]
+        "UIBackgroundModes": [
+          "audio"
+        ]
       }
     },
     "web": {
       "bundler": "metro"
     },
     "plugins": [
+      "expo-android-keyboard-fix",
       "expo-router",
       "expo-font",
       [
@@ -45,6 +52,13 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "b6e4e160-0a4f-4ab1-b58d-d51cbb8f40ea"
+      }
+    },
+    "owner": "lanwenxing"
   }
 }

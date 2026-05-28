@@ -15,7 +15,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from 'react';
-import { AppState, ScrollView, useWindowDimensions, View } from 'react-native';
+import { AppState, Keyboard, Platform, ScrollView, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   createApiClient,
@@ -34,6 +34,7 @@ import {
   NowPlayingBar,
   OnAirIndicator,
   PixelClock,
+  // PetCompanion,
   PlaybackProgressBar,
   PlayerControls,
   TopBar,
@@ -151,6 +152,8 @@ export default function HomeScreen() {
   const chatSendingRef = useRef(false);
   const [latestUserMessage, setLatestUserMessage] = useState<UserMessage | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
+  /* Android 键盘高度追踪，解决 Android 15 KeyboardAvoidingView 失效问题 */
+  const [androidKbHeight, setAndroidKbHeight] = useState(0);
   const [failedArtworkUrl, setFailedArtworkUrl] = useState<string | null>(null);
   const [playbackCapabilities, setPlaybackCapabilities] = useState<PlaybackCapabilities>(
     DEFAULT_PLAYBACK_CAPABILITIES,
@@ -189,6 +192,21 @@ export default function HomeScreen() {
   const handleArtworkError = useCallback(() => {
     if (artworkUrl) setFailedArtworkUrl(artworkUrl);
   }, [artworkUrl]);
+
+  /* Android 键盘监听，替代失效的 KeyboardAvoidingView */
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const showSub = Keyboard.addListener('keyboardDidShow', (e) => {
+      setAndroidKbHeight(e.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
+      setAndroidKbHeight(0);
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   /*
    * 用服务端曲目刷新播放器队列。
@@ -558,7 +576,7 @@ export default function HomeScreen() {
       </ScrollView>
 
       {/* 底部输入区 + 连接状态（脱离 ScrollView，常驻底部） */}
-      <View style={{ alignItems: isWide ? 'center' : 'stretch' }}>
+      <View style={{ alignItems: isWide ? 'center' : 'stretch', paddingBottom: androidKbHeight }}>
         <View
           style={{
             width: '100%',
@@ -569,6 +587,15 @@ export default function HomeScreen() {
           <ConnectionStatus state={connectionState} />
         </View>
       </View>
+
+      {/* Phase Pet prototype：贴边系统伴侣，默认避开底部输入区，可拖拽和收起。 */}
+      {/* <PetCompanion
+        listening={animationActive}
+        speaking={tts.playing}
+        thinking={djLoading}
+        topInset={insets.top}
+        bottomInset={insets.bottom}
+      /> */}
     </View>
   );
 }

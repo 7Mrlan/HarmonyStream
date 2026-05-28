@@ -76,22 +76,25 @@
 
 ---
 
-## 当前任务 · 移除当前宠物体系
+## 当前任务 · 宠物阶段调研与方案审查
 
-- [x] 移除移动端右下角宠物浮层、宠物状态和播放器反馈接线。
-- [x] 删除 `PixelPetSwitcher` 组件文件与 UI 包导出。
-- [x] 删除 API / 服务端模型数据中的 `petSprite` 字段，保留模型本身。
-- [x] 运行 typecheck / lint，复核没有宠物残留引用。
-- [x] 将“旧宠物失败复盘与新宠物准入规则”写入 `tasks/spec.md`，防止后续上下文遗漏。
-- [x] 尝试安装外部 Spec / 设计审查 skill；网络无法连接 GitHub 时创建项目内 `spec-review` skill 作为固定审查框架。
+- [x] 尝试克隆并阅读 `xuemian168/qqpet_automation`；本地 SSH / HTTPS clone 失败，已改用 GitHub 源码页面提取参考事实。
+- [x] 核查当前 Claudio UI / 动画能力边界，标注代码出处。
+- [x] 写 Phase Pet 现状分析 Spec：只给证据和问题，不写实现代码。
+- [x] 用项目内审查规则自审方案：角色生命感、动作资产、状态机、性能、遮挡和失败退出。
+- [x] 使用 `vercel-react-best-practices` 与 `frontend-design` 审查现状分析，通过后继续写功能点与方案比较。
+- [x] 写 Phase Pet 功能点与方案比较：技术路线、推荐 prototype、文件级计划草案。
+- [x] 复核“是否真能达到灵动宠物生命感”，明确能做边界与不能靠代码硬凑的部分。
+- [x] 写 Phase Pet 风险与决策：最终技术路线、动作资产验收、性能验收、回滚条件。
+- [x] 自问是否需要用户素材 / 其他动画流 / 新技术配合；结论是第一轮不需要，改为 Skia 分层角色 rig 后开始编码。
+- [x] 实现 `PetCompanion` prototype：状态机、Skia 分层角色、拖拽/避让与主界面接入。
+- [x] 运行 typecheck / lint / test，并用 Expo Web bundle 验证可编译。
+- [x] 采纳外部评估：明确当前律动 / 嘴型是程序模拟，真实 FFT / TTS 包络留到后续；增强拖拽时头部、身体、手臂的拉扯变形。
 
 ### Review
 
-- 已删除 `packages/ui/src/PixelPetSwitcher.tsx`，并从 `packages/ui/src/index.ts` 移除所有宠物导出。
-- `apps/mobile/app/index.tsx` 不再挂载右下角浮层，不再维护 `petId` / `petAction` / `petActionNonce`，播放器控件不再发宠物反馈。
-- `packages/api/src/types.ts` 与 `server/src/state/modelState.ts` 已删除 `petSprite`，模型本身和当前模型展示保留。
-- 代码残留搜索通过：`PixelPetSwitcher`、`petSprite`、`DEFAULT_PETS`、`onActionFeedback` 在 `apps/packages/server` 下无命中。
-- `tasks/spec.md` 已新增角色 / 宠物动画准入规则：禁止贴图漂浮冒充动画；prototype 也必须有角色人格、六类可区分状态和避让策略。
-- 外部 skill 搜索结果：`ferueda/agent-skills@review-spec`、`julianoczkowski/designer-skills@design-review` 符合方向；安装因当前网络无法连接 GitHub 失败。
-- 已新增 `.agents/skills/spec-review/SKILL.md`，后续审核 Spec / 方案时必须用它检查证据、验收、范围、角色生命感和失败退出标准。
-- 验证通过：`pnpm typecheck`、`pnpm lint`、`pnpm test`。
+- 用户已授权由我自行判断是否继续；第一轮不需要外部素材或新 runtime，按 `tasks/spec.md` §15 的 Skia 分层角色 rig 路线实现。
+- 新增 `packages/ui/src/PetCompanion.tsx`、`packages/ui/src/pet/petBrain.ts`、`packages/ui/src/pet/petTypes.ts`，并在 `apps/mobile/app/index.tsx` 接入贴边、可拖拽、可收起的宠物 prototype。
+- 验证通过：`pnpm typecheck`、`pnpm lint`、`pnpm test`、Expo Web bundle `http://localhost:8087/apps/mobile/index.ts.bundle?...` 返回 200。
+- 目标校正：QQ 宠物只作为生命感参考，当前目标是 Claudio 自己的灵动系统伴侣，不做 1:1 复刻。
+- 外部评估采纳：Skia 依赖已存在；当前没有真实音频 / TTS 包络，所以第一版只做程序化节奏，并已把该限制写入 Spec。
