@@ -5,9 +5,14 @@
  * 上一首 / 下一首以服务端队列为权威，避免歌曲、主播、队列各自为政。
  */
 
-import type { ClaudioApiClient, PlaybackCapabilities, Track } from '@claudio/api';
+import type {
+  ClaudioApiClient,
+  ListeningEventType,
+  PlaybackCapabilities,
+  Track,
+} from '@claudio/api';
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
-import type { RadioPlayerActions, RadioPlayerState } from './useRadioPlayer';
+import type { RadioPlayerActions, RadioPlayerState, RadioTrack } from './useRadioPlayer';
 import type { TtsPlayerActions, TtsPlayerState } from './useTtsPlayer';
 
 type StationRadio = RadioPlayerState & RadioPlayerActions;
@@ -15,7 +20,7 @@ type StationVoice = TtsPlayerState & TtsPlayerActions;
 
 export interface StationControllerInput {
   /* 访问服务端播放队列的 API client。 */
-  apiClient: Pick<ClaudioApiClient, 'playNext' | 'playPrevious'>;
+  apiClient: Pick<ClaudioApiClient, 'playNext' | 'playPrevious' | 'recordListeningEvent'>;
   /* 背景歌曲播放器。 */
   radio: StationRadio;
   /* 主播 TTS 播放器。 */
@@ -57,6 +62,14 @@ export interface StationController {
   playVoice: (url: string) => void;
   /* 用户显式重播最近一次主播语音。 */
   replayVoice: () => void;
+}
+
+/*
+ * 判断当前曲是否值得写入听歌事件。
+ * 空队列占位曲没有 url，不能当成用户真实行为进入记忆。
+ */
+function isRecordableTrack(track: RadioTrack): boolean {
+  return Boolean(track.url && track.title.trim() && track.title !== '—');
 }
 
 /*
@@ -107,6 +120,25 @@ export function useStationController(input: StationControllerInput): StationCont
       if (stationPausedRef.current) radioRef.current.pause();
     }, 0);
   }, []);
+
+  /*
+   * 记录上一首 / 下一首这类用户显式切歌行为。
+   * 失败只静默吞掉，避免记忆写入影响播放主链路。
+   */
+  const recordMoveEvent = useCallback(
+    (direction: 'next' | 'previous', track: RadioTrack) => {
+      if (!isRecordableTrack(track)) return;
+      const type: ListeningEventType = direction === 'next' ? 'skip' : 'previous';
+      void apiClient
+        .recordListeningEvent({
+          type,
+          title: track.title,
+          ...(track.artist ? { artist: track.artist } : {}),
+        })
+        .catch(() => undefined);
+    },
+    [apiClient],
+  );
 
   /*
    * 主按钮：整站暂停 / 继续。
@@ -190,6 +222,7 @@ export function useStationController(input: StationControllerInput): StationCont
     async (direction: 'next' | 'previous') => {
       const radio = radioRef.current;
       const voice = voiceRef.current;
+      const trackBeforeMove = radio.track;
       const wasActive = radio.playing || voice.playing || (radio.buffering && !stationPausedRef.current);
       const shouldStayPaused = stationPausedRef.current || !wasActive;
 
@@ -201,6 +234,7 @@ export function useStationController(input: StationControllerInput): StationCont
           direction === 'next' ? await apiClient.playNext() : await apiClient.playPrevious();
 
         if (result.ok) {
+          recordMoveEvent(direction, trackBeforeMove);
           voice.stop();
           applyApiTracks(result.queue, true);
           if (result.playback) setPlaybackCapabilities?.(result.playback);
@@ -216,7 +250,14 @@ export function useStationController(input: StationControllerInput): StationCont
       else radio.prev();
       if (shouldStayPaused) pauseAfterQueueSwap();
     },
-    [apiClient, applyApiTracks, pauseAfterQueueSwap, setPlaybackCapabilities, setStationPaused],
+    [
+      apiClient,
+      applyApiTracks,
+      pauseAfterQueueSwap,
+      recordMoveEvent,
+      setPlaybackCapabilities,
+      setStationPaused,
+    ],
   );
 
   const nextTrack = useCallback(() => {

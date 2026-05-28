@@ -19,6 +19,7 @@ import { AppState, Keyboard, Platform, ScrollView, useWindowDimensions, View } f
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   createApiClient,
+  type ListeningEventType,
   type ModelInfo,
   type PlaybackCapabilities,
   type StreamEvent,
@@ -42,7 +43,7 @@ import {
   UserBubble,
   type MusicSpectrumMode,
 } from '@claudio/ui';
-import { getApiBaseUrl } from './_config/api';
+import { getApiBaseUrl, getApiSharedToken } from './_config/api';
 import { useNowPlayingMedia } from './_hooks/useNowPlayingMedia';
 import { useRadioPlayer, type RadioTrack } from './_hooks/useRadioPlayer';
 import { useStationController } from './_hooks/useStationController';
@@ -51,6 +52,7 @@ import {
   deriveClaudioLifeState,
   type ClaudioLifeState,
 } from './_utils/claudioLifeState';
+import { shouldRecordMusicFeedback } from './_utils/listeningFeedback';
 import { mapApiTrackToRadioTrack, mapApiTracksToRadioTracks } from './_utils/trackMapping';
 
 /* DJ 默认文案：服务端未接入前的首屏提示，不再作为业务响应来源 */
@@ -178,6 +180,14 @@ function getRadioTrackKey(track: RadioTrack | null | undefined): string {
 }
 
 /*
+ * 判断移动端当前曲是否能进入听歌行为记忆。
+ * 空队列占位曲不能写入，否则会污染用户画像。
+ */
+function isRecordableRadioTrack(track: RadioTrack): boolean {
+  return Boolean(track.url && track.title.trim() && track.title !== '—');
+}
+
+/*
  * 旧服务端没有 playback 字段时的保守推断。
  * 只在 bootstrap 首屏使用；后续缺字段的 queue-update 会保持上一份 capability。
  */
@@ -199,7 +209,10 @@ export default function HomeScreen() {
   const isWide = winWidth >= WIDE_BREAKPOINT;
 
   /* Claudio API client：集中读取 base URL，页面不散写 fetch 地址 */
-  const apiClient = useMemo(() => createApiClient({ baseUrl: getApiBaseUrl() }), []);
+  const apiClient = useMemo(
+    () => createApiClient({ baseUrl: getApiBaseUrl(), authToken: getApiSharedToken() }),
+    [],
+  );
   /* 服务端模型列表，控制 TopBar 模型展示 */
   const [models, setModels] = useState<ModelInfo[]>([]);
   /* 当前模型 id；切换入口后续由新的模型菜单重新接入。 */
@@ -261,6 +274,41 @@ export default function HomeScreen() {
   useEffect(() => {
     currentTrackKeyRef.current = currentTrackKey;
   }, [currentTrackKey]);
+
+  /*
+   * 收藏状态跟随当前曲重置。
+   * 第一版只记录“收藏”事件，不做取消收藏的历史事件回滚。
+   */
+  useEffect(() => {
+    setFaved(false);
+  }, [currentTrackKey]);
+
+  /*
+   * 写入当前曲相关的听歌行为。
+   * 记忆写入失败不影响播放、聊天或 UI 状态，只在服务端日志里留下失败原因。
+   */
+  const recordListeningEventForCurrentTrack = useCallback(
+    (type: ListeningEventType, text?: string) => {
+      const feedbackText = text?.trim();
+      const canAttachTrack = isRecordableRadioTrack(radio.track);
+      if (type !== 'feedback' && !canAttachTrack) return;
+      if (type === 'feedback' && !feedbackText) return;
+
+      void apiClient
+        .recordListeningEvent({
+          type,
+          ...(canAttachTrack
+            ? {
+                title: radio.track.title,
+                ...(radio.track.artist ? { artist: radio.track.artist } : {}),
+              }
+            : {}),
+          ...(feedbackText ? { text: feedbackText } : {}),
+        })
+        .catch(() => undefined);
+    },
+    [apiClient, radio.track],
+  );
 
   /*
    * 封面加载失败时切回原时钟占位。
@@ -537,6 +585,9 @@ export default function HomeScreen() {
       setDjLoading(true);
       setDjTime(sentAt);
       setLatestUserMessage({ text, time: sentAt });
+      if (shouldRecordMusicFeedback(text)) {
+        recordListeningEventForCurrentTrack('feedback', text);
+      }
 
       try {
         const response = await apiClient.sendChat({ text, voice: ttsEnabledRef.current });
@@ -555,8 +606,17 @@ export default function HomeScreen() {
         setChatSending(false);
       }
     },
-    [apiClient, refreshNowAndNext],
+    [apiClient, recordListeningEventForCurrentTrack, refreshNowAndNext],
   );
+
+  /*
+   * 收藏按钮只在从未收藏切到收藏时写入 favorite。
+   * 取消收藏不删除历史事件，避免第一版引入复杂回滚语义。
+   */
+  const handleFavorite = useCallback(() => {
+    if (!faved) recordListeningEventForCurrentTrack('favorite');
+    setFaved((value) => !value);
+  }, [faved, recordListeningEventForCurrentTrack]);
 
   return (
     <View className="flex-1 bg-bg">
@@ -652,7 +712,7 @@ export default function HomeScreen() {
             onPlayPause={station.toggleStation}
             onNext={station.nextTrack}
             onStop={station.stopStation}
-            onFav={() => setFaved((f) => !f)}
+            onFav={handleFavorite}
           />
 
           {/* DJ 长文气泡 */}

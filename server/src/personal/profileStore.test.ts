@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { loadUserMusicProfile } from './profileStore.js';
+import { appendListeningEvent, loadUserMusicProfile } from './profileStore.js';
 
 let tempDirs: string[] = [];
 
@@ -201,5 +201,49 @@ describe('loadUserMusicProfile', () => {
     });
     expect(profile.djMemory[0]?.summary).toBe('深夜不喜欢太煽情');
     expect(profile.listeningEvents.map((event) => event.type)).toEqual(['favorite', 'skip']);
+  });
+
+  it('追加听歌事件后可被下一轮 profile 读取', async () => {
+    const dir = await createProfileDir();
+
+    const event = await appendListeningEvent(
+      {
+        type: 'favorite',
+        title: 'Ylang Ylang',
+        artist: 'FKJ',
+      },
+      {
+        profileDir: dir,
+        now: () => new Date('2026-05-29T10:00:00+08:00'),
+        createId: () => 'event-favorite-1',
+      },
+    );
+
+    const profile = await loadUserMusicProfile({ profileDir: dir });
+
+    expect(event).toMatchObject({
+      id: 'event-favorite-1',
+      type: 'favorite',
+      title: 'Ylang Ylang',
+      artist: 'FKJ',
+      at: '2026-05-29T02:00:00.000Z',
+    });
+    expect(profile.loadedFiles).toContain('listening-events.jsonl');
+    expect(profile.listeningEvents[0]).toMatchObject({
+      id: 'event-favorite-1',
+      type: 'favorite',
+      title: 'Ylang Ylang',
+    });
+  });
+
+  it('拒绝没有文本的 feedback 和没有曲目的普通行为', async () => {
+    const dir = await createProfileDir();
+
+    await expect(
+      appendListeningEvent({ type: 'feedback', text: '   ' }, { profileDir: dir }),
+    ).rejects.toThrow('feedback listening event requires text');
+    await expect(appendListeningEvent({ type: 'skip' }, { profileDir: dir })).rejects.toThrow(
+      'track listening event requires title or text',
+    );
   });
 });

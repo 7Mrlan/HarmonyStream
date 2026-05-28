@@ -36,7 +36,7 @@ const app = Fastify({
 app.addHook('onRequest', (request, reply, done) => {
   reply.header('Access-Control-Allow-Origin', '*');
   reply.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  reply.header('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+  reply.header('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Claudio-Client');
 
   if (request.method === 'OPTIONS') {
     reply.code(204).send();

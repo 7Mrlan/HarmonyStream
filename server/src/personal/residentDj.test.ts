@@ -195,6 +195,72 @@ describe('Resident DJ plan', () => {
     expect(plan.evidence.some((item) => item.type === 'event')).toBe(true);
   });
 
+  it('收藏事件会提高同名歌曲信任分，下一轮更容易被选中', () => {
+    const plan = buildResidentDjPlan({
+      userText: '上午随便来点',
+      requestKind: 'range',
+      personalContext: context(
+        [
+          section(
+            '上午轻音乐',
+            ['清晨', '低刺激'],
+            [
+              { name: 'Open Eye Signal', artist: 'Jon Hopkins' },
+              { name: 'Thrown', artist: 'Kiasmos' },
+            ],
+          ),
+        ],
+        new Date('2026-05-28T09:00:00+08:00'),
+        [],
+        [
+          {
+            id: 'event-fav-thrown',
+            type: 'favorite',
+            title: 'Thrown',
+            artist: 'Kiasmos',
+            sourceEventIds: [],
+          },
+        ],
+      ),
+    });
+
+    expect(plan.curatedCandidates[0]?.title).toBe('Thrown');
+    expect(plan.evidence.some((item) => item.type === 'event')).toBe(true);
+  });
+
+  it('上一首事件会像跳过一样降低同名歌曲信任分', () => {
+    const plan = buildResidentDjPlan({
+      userText: '上午随便来点',
+      requestKind: 'range',
+      personalContext: context(
+        [
+          section(
+            '上午轻音乐',
+            ['清晨', '低刺激'],
+            [
+              { name: 'Open Eye Signal', artist: 'Jon Hopkins' },
+              { name: 'Thrown', artist: 'Kiasmos' },
+            ],
+          ),
+        ],
+        new Date('2026-05-28T09:00:00+08:00'),
+        [],
+        [
+          {
+            id: 'event-previous-open-eye',
+            type: 'previous',
+            title: 'Open Eye Signal',
+            artist: 'Jon Hopkins',
+            sourceEventIds: [],
+          },
+        ],
+      ),
+    });
+
+    expect(plan.curatedCandidates[0]?.title).toBe('Thrown');
+    expect(plan.evidence.some((item) => item.type === 'event')).toBe(true);
+  });
+
   it('异步 orchestrator 某个辅助 agent 失败时仍返回候选和降级原因', async () => {
     const plan = await buildResidentDjPlanAsync({
       userText: '上午随便来点',

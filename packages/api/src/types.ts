@@ -59,6 +59,25 @@ export interface ChatResponse {
   segue?: string; // 过渡词
 }
 
+/* ========== POST /api/listening-events ========== */
+
+export type ListeningEventType = 'play' | 'skip' | 'previous' | 'favorite' | 'repeat' | 'feedback';
+
+export interface ListeningEventRequest {
+  type: ListeningEventType;
+  title?: string;
+  artist?: string;
+  text?: string;
+  at?: string;
+  sourceEventIds?: string[];
+}
+
+export interface ListeningEventResponse {
+  ok: boolean;
+  id?: string;
+  reason?: string;
+}
+
 /* ========== GET /api/now ========== */
 
 export interface NowResponse {

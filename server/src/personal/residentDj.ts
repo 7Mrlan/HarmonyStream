@@ -887,8 +887,13 @@ function formatTrack(track: Track): string {
 /* 格式化听歌事件证据。 */
 function formatListeningEvent(event: PersonalContext['listeningEvents'][number]): string {
   const title = event.title ? ` ${event.title}${event.artist ? ` / ${event.artist}` : ''}` : '';
-  const text = event.text ? `：${event.text}` : '';
+  const text = event.text ? `：${compactLine(event.text, 32)}` : '';
   return `${event.type}${title}${text}`;
+}
+
+/* 压缩事件证据，避免用户原话长段进入 Resident DJ prompt。 */
+function compactLine(value: string, maxLength: number): string {
+  return value.replace(/\s+/g, ' ').trim().slice(0, maxLength);
 }
 
 /* 字符串去重。 */

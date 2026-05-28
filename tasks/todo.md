@@ -42,6 +42,7 @@
 - [x] Phase L.1：Resident DJ Agent 服务端闭环
 - [x] Phase L.2：测试整理 + Resident DJ 并行多智能体升级
 - [x] Phase L.3：Claudio Life State Bus
+- [x] Phase L.4：Claudio Personal Memory Loop
 - [ ] Phase M：用户音源导入 UI
 - [ ] Phase Pet：Claudio 灵动系统伴侣 prototype（GitHub 侧已合入设计草案，代码未实装）
 - [ ] Phase K：歌曲像素海报
@@ -82,6 +83,29 @@
 - 终端窗口操作：仍不生效时，在运行 Expo 的终端窗口按 `Ctrl + C` 停掉 Metro。
 - 终端命令：`pnpm --filter @claudio/mobile dev -- --clear`
 - 浏览器操作：重新打开 Expo Web 页面并再次硬刷新。
+
+---
+
+## 当前任务 · Phase L.4 Claudio Personal Memory Loop
+
+- [x] 将 Phase L.4 写入 `tasks/spec.md`：本地听歌事件写入、移动端行为上报、保守记忆策略和验证边界。
+- [x] 新增服务端 `POST /api/listening-events` 与 JSONL append 写入能力。
+- [x] 扩展 `packages/api` 共享类型和 client 方法。
+- [x] 移动端接入收藏、下一首、上一首和明显聊天反馈上报；失败不阻塞播放。
+- [x] 补测试：写入后可读取、非法事件拒绝、收藏加分、跳过 / 上一首降分、明显反馈、Critic 保持有效。
+- [x] 终端命令：运行 `pnpm test`。
+- [x] 终端命令：运行 `pnpm test:full`。
+- [x] 用审查 AI 复核隐私、误写记忆、播放链路副作用。
+- [x] 阶段验收通过后归档 Phase L.4 Spec 并提交代码。
+
+### Phase L.4 Review
+
+- 结果：本地个人记忆写入闭环已完成，`POST /api/listening-events` append-only 写入 `listening-events.jsonl`，下一轮 Resident DJ 会读取并影响推荐。
+- 结果：移动端收藏写 `favorite`，服务端切歌成功后写 `skip / previous`，明确音乐反馈才写 `feedback`；写入失败不阻塞播放和聊天。
+- 安全：写入口带 `X-Claudio-Client` 来源标记，支持 `SHARED_TOKEN`；外站 Origin、超长文本和缺来源写入会被拒绝。
+- 审查：三轮审查 AI 复核后无阻塞问题；已修复 feedback 误判、切歌未移动误记、Resident DJ 证据长文本风险。
+- 验证：终端命令 `pnpm test` 通过；全仓 typecheck、mobile 2 个测试文件 / 10 个测试、server 12 个测试文件 / 52 个测试通过。
+- 验证：终端命令 `pnpm test:full` 通过；server build、结构烟测和 forced-no-result 分支通过。
 
 ---
 
