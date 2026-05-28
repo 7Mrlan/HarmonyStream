@@ -11,8 +11,16 @@
 import { env } from '../env.js';
 import { broadcastStreamEvent } from '../realtime/streamHub.js';
 import { synthesizeForChat } from './ttsService.js';
+import type { TtsStyle } from './types.js';
 
 let currentChatId = 0;
+
+export interface TtsScheduleOptions {
+  /* 音色，可选。 */
+  voice?: string;
+  /* 动态语气，可选。 */
+  style?: TtsStyle;
+}
 
 /* 推进 chatId；handleChat 入口调用，确保旧任务的广播会被 stale check 丢弃。 */
 export function nextChatId(): number {
@@ -25,11 +33,11 @@ export function nextChatId(): number {
  * 不返回 Promise，调用方应 `void scheduleTts(...)`。
  * baseUrl 用于把 audioId 拼成可访问 URL；缺省时使用相对路径。
  */
-export function scheduleTts(text: string, chatId: number, voice?: string): void {
+export function scheduleTts(text: string, chatId: number, options: TtsScheduleOptions = {}): void {
   const trimmed = text.trim();
   if (!trimmed) return;
 
-  void runSynthesis(trimmed, chatId, voice);
+  void runSynthesis(trimmed, chatId, options);
 }
 
 /*
@@ -40,12 +48,12 @@ export function scheduleTrackTts(
   text: string,
   trackId: string,
   isStillCurrent: () => boolean,
-  voice?: string,
+  options: TtsScheduleOptions = {},
 ): void {
   const trimmed = text.trim();
   if (!trimmed || !trackId) return;
 
-  void runTrackSynthesis(trimmed, trackId, isStillCurrent, voice);
+  void runTrackSynthesis(trimmed, trackId, isStillCurrent, options);
 }
 
 /*
@@ -53,9 +61,13 @@ export function scheduleTrackTts(
  * 任意失败 / chatId 过期都会静默吞掉，不影响主链路。
  * 失败原因仅打到 console，便于排障；不发任何错误事件。
  */
-async function runSynthesis(text: string, chatId: number, voice?: string): Promise<void> {
+async function runSynthesis(
+  text: string,
+  chatId: number,
+  options: TtsScheduleOptions,
+): Promise<void> {
   try {
-    const result = await synthesizeForChat({ text, voice });
+    const result = await synthesizeForChat({ text, ...options });
     if (!result) {
       console.warn('[tts] synthesizeForChat returned null (all providers failed)');
       return;
@@ -77,11 +89,11 @@ async function runTrackSynthesis(
   text: string,
   trackId: string,
   isStillCurrent: () => boolean,
-  voice?: string,
+  options: TtsScheduleOptions,
 ): Promise<void> {
   try {
     if (!isStillCurrent()) return;
-    const result = await synthesizeForChat({ text, voice });
+    const result = await synthesizeForChat({ text, ...options });
     if (!result) {
       console.warn('[tts] synthesizeForChat returned null for track commentary');
       return;

@@ -43,6 +43,7 @@ export function createMimoTtsProvider(
       audioCacheAllowed: true,
       timeoutMs,
       defaultVoice,
+      cacheScope: `${model}:${styleInstruction}`,
     },
     isEnabled: () => enabled,
     synthesize: async (input) => {
@@ -96,10 +97,14 @@ async function synthesize(
    * 预设 / VoiceClone：style 指令放 user 消息，voice 放 audio.voice。
    */
   const isVoiceDesign = model === 'mimo-v2.5-tts-voicedesign';
+  const mergedStyleInstruction = mergeStyleInstruction(
+    styleInstruction,
+    input.style?.styleInstruction,
+  );
   if (isVoiceDesign) {
-    messages.push({ role: 'user', content: voice });
-  } else if (styleInstruction.trim()) {
-    messages.push({ role: 'user', content: styleInstruction });
+    messages.push({ role: 'user', content: mergeStyleInstruction(voice, mergedStyleInstruction) });
+  } else if (mergedStyleInstruction) {
+    messages.push({ role: 'user', content: mergedStyleInstruction });
   }
   messages.push({ role: 'assistant', content: input.text });
 
@@ -145,4 +150,10 @@ async function synthesize(
     mime: 'audio/wav',
     voice,
   };
+}
+
+/* 合并全局主播基调和本轮动态语气。 */
+function mergeStyleInstruction(base: string, dynamic: string | undefined): string {
+  const parts = [base.trim(), dynamic?.trim()].filter(Boolean);
+  return [...new Set(parts)].join('\n');
 }

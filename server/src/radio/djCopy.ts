@@ -4,15 +4,21 @@
  */
 
 import type { ChatResponse, Track } from '@claudio/api';
+import type { PersonalContext } from '../personal/profileTypes.js';
 
 /* 明确点歌的快速主播文案：保持电台主播口吻，不暴露音源、LLM、系统状态。 */
-export function buildQuickSongChatResponse(text: string, track: Track, musicReason: string): ChatResponse {
+export function buildQuickSongChatResponse(
+  text: string,
+  track: Track,
+  musicReason: string,
+  personalContext?: PersonalContext,
+): ChatResponse {
   const artist = track.artist?.trim();
   const title = track.title.trim();
   const intro = buildSongIntro(title, artist);
 
   return {
-    say: intro,
+    say: appendPersonalHint(intro, track.title, personalContext),
     play: [title],
     reason: musicReason,
     segue: buildSongSegue(title, artist),
@@ -29,12 +35,13 @@ export function buildFallbackChatResponse(
   modelDisplayName: string,
   llmFallbackReason?: string,
   musicFallbackReason?: string,
+  personalContext?: PersonalContext,
 ): ChatResponse {
   const reason = `根据“${text || '今晚随便听点'}”选择当前可播放的真实曲目：${track.title}。`;
   const fallbackDetails = [llmFallbackReason, musicFallbackReason].filter(Boolean).join('；');
 
   return {
-    say: buildMockDjScript(text, track, modelDisplayName),
+    say: buildMockDjScript(text, track, modelDisplayName, personalContext),
     play: [track.title],
     reason: fallbackDetails ? `${reason} fallback：${fallbackDetails}。` : reason,
     segue: buildSongSegue(track.title, track.artist),
@@ -88,9 +95,9 @@ export function buildTrackSwitchChatResponse(
 function buildSongIntro(title: string, artist?: string): string {
   const songName = artist ? `${artist}的《${title}》` : `《${title}》`;
   const templates = [
-    `收到，${songName}。这首别只当点歌反馈，先听它开头怎么把空间撑开；人声一站稳，整段情绪就会往里收。`,
-    `好，切 ${songName}。它不是靠大嗓门抓人，重点在节奏和旋律怎么一点点贴近耳朵，先让前奏把位置摆好。`,
-    `${songName}，安排。先别急着跳副歌，听人声怎么站住，再听后面的层次怎么慢慢压上来。`,
+    `那就 ${songName}。先别急着跳副歌，听它开头怎么把耳朵拉进去。`,
+    `好，${songName}。这首不用铺垫太多，前几秒的劲儿够不够，你马上就知道。`,
+    `${songName}，接上。它适合直接进，不适合被我讲太满。`,
   ];
   return pickStableTemplate(templates, `${artist ?? ''}:${title}`);
 }
@@ -98,11 +105,7 @@ function buildSongIntro(title: string, artist?: string): string {
 /* 播放前过渡句同样避免固定“下面欣赏”，但语义保持“进入歌曲”。 */
 function buildSongSegue(title: string, artist?: string): string {
   const songName = artist ? `${artist}的《${title}》` : `《${title}》`;
-  const templates = [
-    `进歌，${songName}。`,
-    `${songName}，接住这一段。`,
-    `来，听 ${songName}。`,
-  ];
+  const templates = [`耳朵给它：`, `这首可以，进：`, `别铺垫了：`];
   return pickStableTemplate(templates, `segue:${artist ?? ''}:${title}`);
 }
 
@@ -119,9 +122,41 @@ function pickStableTemplate(templates: string[], key: string): string {
  * 构建 mock DJ 播报。
  * 文案保持稳定结构，方便 LLM 失败时做 UI 回退。
  */
-function buildMockDjScript(text: string, track: Track, modelDisplayName: string): string {
+function buildMockDjScript(
+  text: string,
+  track: Track,
+  modelDisplayName: string,
+  personalContext?: PersonalContext,
+): string {
   const prompt = text || '今晚随便听点';
   const artist = track.artist ? `${track.artist}的` : '';
+  const personalHint = findPersonalHint(track.title, personalContext);
 
-  return `${modelDisplayName} 收到“${prompt}”。先接 ${artist}《${track.title}》，不多解释，听它第一段怎么站住。`;
+  if (personalHint) {
+    return `${modelDisplayName} 收到“${prompt}”。这几首里先推 ${artist}《${track.title}》，因为它在你的资料里和${personalHint}连着。`;
+  }
+
+  return `${modelDisplayName} 收到“${prompt}”。这几首里先推 ${artist}《${track.title}》，先听它怎么把这一段接稳。`;
+}
+
+/* 给明确点歌补一小句个人资料证据；没有证据时保持普通电台口吻。 */
+function appendPersonalHint(
+  intro: string,
+  title: string,
+  personalContext: PersonalContext | undefined,
+): string {
+  const personalHint = findPersonalHint(title, personalContext);
+  if (!personalHint) return intro;
+  return `${intro} 这首在你的资料里和${personalHint}连着，不用硬讲满。`;
+}
+
+/* 查找某首歌的个人候选理由。 */
+function findPersonalHint(
+  title: string,
+  personalContext: PersonalContext | undefined,
+): string | null {
+  if (!personalContext?.hasUserData) return null;
+  const candidate = personalContext.candidates.find((item) => item.track.title === title);
+  const reason = candidate?.reasons[0];
+  return reason ? reason.replace(/^你/u, '') : null;
 }

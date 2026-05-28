@@ -8,10 +8,10 @@
 
 ## 当前活跃索引
 
-- 当前主线：AI 电台已完成“推荐队列体验清晰”、`radioState.ts` 编排拆分、自动化测试入口与 Phase F 产品化任务；用户明确插队 Phase Pet（Claudio 灵动系统伴侣）调研、方案审查与 prototype，完成后再回到 Phase K（歌曲像素海报）。
-- 已完成：Phase A 后端 API 骨架；Phase B 移动端接入；Phase C LLM 主播；Phase C+ 等待体验；Phase D 音乐来源；Phase D.5 性能地基；Phase E TTS 入声；Phase F.0 SDK 56 依赖升级；Phase F.A 音频会话/后台权限；Phase F.B WS 心跳/重连；Phase F.C 锁屏 metadata 代码接线；Phase F.D APK 构建入口；Phase F.E 服务端 graceful shutdown；Phase J 队列与推荐体验收口；Phase J.1 radioState 编排拆分；Phase J.2 chatTurnPlanner 抽离；Phase J.3 自动化测试入口。
-- 当前阶段：Phase Pet 现状分析待确认；当前只允许调研、方案自审和 Spec 分段，不允许开始实现代码。
-- 当前 HARD-GATE：下一轮中等及以上阶段必须重新分段 Spec（现状分析 → 功能点 → 风险与决策）并等待用户确认。
+- 当前主线：AI 电台进入 Phase L.2，整理 L.1 测试夹具，并把 Resident DJ 升级为混合并行智能体编排。
+- 已完成：Phase A 后端 API 骨架；Phase B 移动端接入；Phase C LLM 主播；Phase C+ 等待体验；Phase D 音乐来源；Phase D.5 性能地基；Phase E TTS 入声；Phase F.0 SDK 56 依赖升级；Phase F.A 音频会话/后台权限；Phase F.B WS 心跳/重连；Phase F.C 锁屏 metadata 代码接线；Phase F.D APK 构建入口；Phase F.E 服务端 graceful shutdown；Phase J 队列与推荐体验收口；Phase J.1 radioState 编排拆分；Phase J.2 chatTurnPlanner 抽离；Phase J.3 自动化测试入口；Phase L.0 个人音乐记忆与 Context Engine。
+- 当前阶段：Phase L.2 正在实现；用户已明确要求 “PLEASE IMPLEMENT THIS PLAN”，视为本阶段完整方案确认。
+- 当前 HARD-GATE：Phase L.2 不删除 L.1 保护性测试，不扩公开 API，不新增移动端 UI，不把普通网络 API 强行改成 worker。
 - 当前边界：BYO-LLM 用户自配 key/baseUrl/model 单独作为 Phase F.5，不混入 Phase F 锁屏 / APK 验收。
 
 ---
@@ -21,9 +21,19 @@
 **Claudio**：一个像素风个人 AI 电台 App，会读懂用户输入，用 DJ 口吻推荐音乐，并把可播放曲目推给移动端播放器。
 
 - 产品入口是电台评论区 / 对话输入，不新增独立音乐搜索框；用户点歌、描述心情、要求换风格都从同一个电台语义入口进入。
-- LLM 主播负责意图理解、选曲策划、短 DJ 文案、歌曲背景 / 趣闻过渡；不负责直接抓取音频 URL、执行第三方源脚本或保存密钥。
+- Claudio 的核心差异不是“能播歌”或“回复很短”，而是能基于用户长期歌单、人生阶段、场景、心情、时间与播放历史做私人 DJ 决策。
+- LLM 主播负责意图理解、选曲策划、DJ 文案、歌曲背景 / 趣闻过渡；不负责直接抓取音频 URL、执行第三方源脚本或保存密钥。
 - 音乐解析仍由 provider chain 负责：LLM 输出候选曲名或偏好，服务端 resolver / LX Bridge 再把候选解析为可播放 `Track`。
-- 背景 / 趣闻必须短且可信；不确定时用氛围化描述或明确弱化，不编造具体年份、奖项、制作人等硬事实。
+- DJ 内容长度不以“短 / 长”本身为目标：缺少个人上下文时禁止用空泛长文硬撑；有真实用户资料、歌曲事实和场景依据时，可以输出更完整的电台式过渡。
+- 背景 / 趣闻必须可信；不确定时用氛围化描述或明确弱化，不编造具体年份、奖项、制作人或用户回忆等硬事实。
+
+### 0.1 产品路线纠偏：个人音乐记忆优先
+
+- 2026-05-27 复盘结论：当前实现已具备真实音源、播放队列、TTS talk-over、后台播放等基础设施，但缺少施工图第一层 `taste.md / routines.md / playlists.json / mood-rules.md` 和第三层 Context Window，导致 LLM 主播像通用音乐推荐器。
+- LX-compatible 音源是必要地基，不是产品灵魂；下一步不能继续把精力放在视觉、海报、宠物、短 prompt 或播放器表层，而要先建立用户音乐资料层。
+- “开心 / 深夜 / 学习 / 怀旧”等输入不应直接映射公共硬编码歌单；必须先检索用户个人歌库、长期偏好、最近播放和当前场景，再决定候选歌曲。
+- 主播文案质量的根因不是 prompt 文风，而是上下文供给。Prompt 只能表达规则，不能替代用户音乐数据、环境注入和状态记忆。
+- Phase L.0 完成前，不再把“更短回复”“更文艺文案”“单次情绪歌单”作为主线优化目标。
 
 ---
 
@@ -87,6 +97,7 @@
 - Phase F.5 预留为 BYO-LLM：用户自配 API key、baseUrl、model、provider 参数。该阶段必须单独立 Spec，重点处理密钥存储、日志脱敏、运行时校验和 fallback；不得把用户 key 写入仓库、WS 事件、日志或公开响应。
 - LLM 输出必须经过运行时 JSON 解析和字段归一化，不信任模型裸输出。
 - LLM 的产品职责是“电台主播 + 选曲策划”，不是通用问答助手或搜索 UI 替代品：它应把用户评论转成播放意图，并给出自然过渡。
+- 主推荐 prompt 必须吃到检索后的个人上下文：用户资料、相关歌单候选、场景规则、最近播放历史和必要环境信息；没有这些上下文时，不能假装已经了解用户。
 - 主推荐和切歌播报必须隔离上下文：普通推荐默认只围绕本轮用户输入和本轮预选曲目；只有用户明确说“接着上一首 / 类似这首 / 换个同风格”时，主推荐才允许引用当前曲目。
 - 切歌短播报才允许讨论“从上一首到下一首”的关系；它必须短、异步、可过期丢弃，不能污染下一次普通推荐。
 - 没有 key、超时、HTTP 错误或解析失败时，服务端必须走 fallback，不让移动端断链。
@@ -128,7 +139,7 @@
 ## 7. 工作流硬约束
 
 - 中等及以上任务必须先写分段 Spec：现状分析 → 功能点与文件级计划 → 风险与决策。
-- 每段都要等待用户确认；完整 Spec 确认后才进入编码 HARD-GATE。
+- 默认每段都要等待用户确认；但 2026-05-28 用户已对 Phase L.0 授权连续执行，本阶段不再阻塞等待确认。
 - 现状分析必须有代码出处：文件路径 + 函数名 / 模块名。
 - 验证未完成，不得标记完成。
 - 用户指出错误后，必要时写入 `tasks/lessons.md`，避免同类问题复发。
@@ -141,24 +152,26 @@
 
 ## 8. 历史阶段摘要
 
-| 阶段        | 状态 | 当前仍有效的结论                                                                                                                                           |
-| ----------- | ---: | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Iter 0      | 完成 | monorepo、共享 tsconfig、UI/core/api/server/mobile 骨架已建立。                                                                                            |
-| UI 动画架构 | 完成 | 高频视觉走 Reanimated + Skia / Web canvas；避免 JS RAF + React state 热路径。                                                                              |
-| Phase A     | 完成 | 服务端 `/api/chat`、`/api/now`、`/api/next`、`/api/models`、`/stream` 已打通内存闭环。                                                                     |
-| Phase B     | 完成 | 移动端通过 `packages/api` 接入服务端 HTTP / WS；服务端 playlist 可覆盖本地默认播放列表。                                                                   |
-| Phase C     | 完成 | 服务端 LLM adapter 已接入；DeepSeek 真实路径与无 key fallback 均验证通过。                                                                                 |
-| Phase C+    | 完成 | DJ 气泡等待态已切到调频动画；不再使用本地假等待文案。                                                                                                      |
-| Phase D     | 完成 | 服务端 `musicResolver` + fallback catalog + 可选 `ncm` provider；移动端 artwork 链路打通。                                                                 |
-| Phase D.5   | 完成 | provider chain、TTL/LRU cache、Range route、客户端 60% 预热、metrics 已落地。                                                                              |
-| Phase E     | 完成 | `msedge-tts` 接入；`tts-ready`、`/media/tts/:id`、独立 `useTtsPlayer`、DJBubble REPLAY 已落地。                                                            |
-| Phase H     | 完成 | 电台总控 / 歌曲队列 / 主播语音三层语义落地；完整历史见 `tasks/spec/phase-h-radio-playback-controls.md`。                                                   |
-| Phase J     | 完成 | 队列数量、上一首 / 下一首禁用、后台续推、切歌短播报与 track-aware TTS 过期保护已落地；完整历史见 `tasks/spec/phase-j-queue-recommendation-experience.md`。 |
-| Phase J.1   | 完成 | `radioState.ts` 保留 facade，模型、队列纯函数、session 续推、切歌播报拆入独立模块；完整历史见 `tasks/spec/phase-j1-radio-state-orchestration-split.md`。   |
-| Phase J.2   | 完成 | chat planning 抽入 `chatTurnPlanner.ts`，`radioState.ts` 只保留状态提交与副作用；完整历史见 `tasks/spec/phase-j2-chat-turn-planner.md`。                   |
-| Phase J.3   | 完成 | 新增 Vitest 单元测试与根 `test/test:full` 两层入口，修复明确点歌解析顺序 bug；完整历史见 `tasks/spec/phase-j3-automated-test-entry.md`。                   |
-| Phase F     | 完成 | SDK 56 后台播放、锁屏 metadata、APK 构建入口、WS 重连与 graceful shutdown 已落地；完整历史见 `tasks/spec/phase-f-productization.md`。                      |
-| Phase F.0   | 完成 | Expo SDK 56 / React 19.2.6 / RN 0.85.3 / TypeScript 6.0.3 升级完成；NativeWind 类型 shim 和临时 override 已清理。                                          |
+| 阶段        | 状态 | 当前仍有效的结论                                                                                                                                               |
+| ----------- | ---: | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Iter 0      | 完成 | monorepo、共享 tsconfig、UI/core/api/server/mobile 骨架已建立。                                                                                                |
+| UI 动画架构 | 完成 | 高频视觉走 Reanimated + Skia / Web canvas；避免 JS RAF + React state 热路径。                                                                                  |
+| Phase A     | 完成 | 服务端 `/api/chat`、`/api/now`、`/api/next`、`/api/models`、`/stream` 已打通内存闭环。                                                                         |
+| Phase B     | 完成 | 移动端通过 `packages/api` 接入服务端 HTTP / WS；服务端 playlist 可覆盖本地默认播放列表。                                                                       |
+| Phase C     | 完成 | 服务端 LLM adapter 已接入；DeepSeek 真实路径与无 key fallback 均验证通过。                                                                                     |
+| Phase C+    | 完成 | DJ 气泡等待态已切到调频动画；不再使用本地假等待文案。                                                                                                          |
+| Phase D     | 完成 | 服务端 `musicResolver` + fallback catalog + 可选 `ncm` provider；移动端 artwork 链路打通。                                                                     |
+| Phase D.5   | 完成 | provider chain、TTL/LRU cache、Range route、客户端 60% 预热、metrics 已落地。                                                                                  |
+| Phase E     | 完成 | `msedge-tts` 接入；`tts-ready`、`/media/tts/:id`、独立 `useTtsPlayer`、DJBubble REPLAY 已落地。                                                                |
+| Phase H     | 完成 | 电台总控 / 歌曲队列 / 主播语音三层语义落地；完整历史见 `tasks/spec/phase-h-radio-playback-controls.md`。                                                       |
+| Phase J     | 完成 | 队列数量、上一首 / 下一首禁用、后台续推、切歌短播报与 track-aware TTS 过期保护已落地；完整历史见 `tasks/spec/phase-j-queue-recommendation-experience.md`。     |
+| Phase J.1   | 完成 | `radioState.ts` 保留 facade，模型、队列纯函数、session 续推、切歌播报拆入独立模块；完整历史见 `tasks/spec/phase-j1-radio-state-orchestration-split.md`。       |
+| Phase J.2   | 完成 | chat planning 抽入 `chatTurnPlanner.ts`，`radioState.ts` 只保留状态提交与副作用；完整历史见 `tasks/spec/phase-j2-chat-turn-planner.md`。                       |
+| Phase J.3   | 完成 | 新增 Vitest 单元测试与根 `test/test:full` 两层入口，修复明确点歌解析顺序 bug；完整历史见 `tasks/spec/phase-j3-automated-test-entry.md`。                       |
+| Phase F     | 完成 | SDK 56 后台播放、锁屏 metadata、APK 构建入口、WS 重连与 graceful shutdown 已落地；完整历史见 `tasks/spec/phase-f-productization.md`。                          |
+| Phase F.0   | 完成 | Expo SDK 56 / React 19.2.6 / RN 0.85.3 / TypeScript 6.0.3 升级完成；NativeWind 类型 shim 和临时 override 已清理。                                              |
+| Phase L.0   | 完成 | 服务端个人资料层、个人候选检索、Context Assembler、DJ prompt 上下文、MiMo 动态 style TTS 已落地；完整历史见 `tasks/spec/phase-l0-personal-context-engine.md`。 |
+| Phase L.1   | 完成 | Resident DJ 服务端闭环已落地：简单歌单、隐式学习文件读取、curated candidates、深聊边播和 Critic；完整历史见 `tasks/spec/phase-l1-resident-dj-agent.md`。       |
 
 ---
 
@@ -218,12 +231,14 @@
 
 ### 14.1 主线顺序
 
-1. Phase K：歌曲像素海报。
-   - 当前已有 `Track.artwork -> TrackArtworkPanel -> PixelClock fallback` 链路；后续补真正轻量像素海报生成 / 缓存策略。
-2. Phase L：用户歌单 JSON 偏好。
-   - 导入歌单只作为口味种子，提取偏好并推荐相似但不固定的歌曲；不能把导入歌单变成固定播放列表。
-3. Phase M：用户音源导入 UI。
+1. Phase L.0：个人音乐记忆与 Context Engine。
+   - 建立 `taste.md / routines.md / playlists.json / mood-rules.md` 或等价资料层；支持导入结构化歌单 JSON，检索个人候选曲，组装用户输入、时间、播放历史、场景和候选歌曲后再调用 LLM。
+   - 导入歌单只作为口味种子和个人记忆来源，提取偏好并推荐相似但不固定的歌曲；不能把导入歌单变成固定播放列表。
+   - 完成条件：`/api/chat` 的推荐先经过个人资料检索；DJ 文案能引用真实资料或明确只讲听感；测试覆盖“开心 / 深夜 / 怀旧 / 明确点歌”四类路径。
+2. Phase M：用户音源导入 UI。
    - 默认双源池已可开箱即用；后续设置页提供用户源导入、验证、回滚和沙箱状态展示。
+3. Phase K：歌曲像素海报。
+   - 当前已有 `Track.artwork -> TrackArtworkPanel -> PixelClock fallback` 链路；个人电台核心闭环稳定后，再补真正轻量像素海报生成 / 缓存策略。
 4. Phase N：真实音频律动。
    - 当前频谱是视觉模拟；真实 FFT / PCM 律动需要单独评估 Web 与 Native 能力，不混入队列体验阶段。
 
@@ -231,7 +246,7 @@
 
 - P0 bug、安全问题、真机播放稳定性、明显性能回归可以插入为当前 Phase 的子阶段，例如 `Phase J.1`。
 - 插队阶段必须写清楚“插队原因、完成条件、回到哪条主线”，完成后回到本路线图的下一项。
-- 视觉增强不得抢在播放语义之前；偏好系统不得抢在队列语义之前；音源 UI 不得绕过 LX worker 沙箱。
+- 视觉增强不得抢在个人音乐记忆之前；音源 UI 不得绕过 LX worker 沙箱；prompt 文风调整不得替代 Context Engine。
 
 ---
 
@@ -371,10 +386,51 @@
 - R4：依赖膨胀。缓解：第一版不新增 native runtime；只使用现有 Skia / Reanimated / Gesture Handler。
 - 回滚条件：六状态不可分、资产像贴图、拖拽生硬、遮挡核心控件、性能影响主流程、需要大规模引入不可控依赖，任一命中即删除 prototype，不进入主界面。
 
-### 15.16 编码 HARD-GATE
+### 15.16 当前实现状态与后续 HARD-GATE
 
-- 本阶段 Spec 到这里才算完整：现状分析、skill 审查、技术路线、功能点、风险决策和验收标准已齐。
-- 用户确认完整 Spec 后，才能创建 `packages/ui/src/pet/*` 和 `PetCompanion.tsx`。
-- 第一轮编码只做 Skia 分层角色 prototype，不改服务端契约，不改模型切换逻辑，不引入 Rive / Lottie / WebView / Ruffle，不要求用户提供素材。
+- GitHub 侧当前只合入 Phase Pet 设计草案和移动端注释占位；`apps/mobile/app/index.tsx` 中 `PetCompanion` import / render 仍被注释，`packages/ui/src/PetCompanion.tsx` 与 `packages/ui/src/pet/*` 尚不存在。
+- Phase Pet 因此仍停留在设计草案 / 待实现状态；不能把当前代码描述为已具备可运行宠物 prototype。
+- 后续若继续扩展宠物，仍必须重新走中等及以上任务 HARD-GATE，先补当前代码现状、功能点、风险决策与验收标准。
+- 后续扩展不得改服务端契约，不得把程序化律动描述为真实 FFT / TTS 包络，不引入 Rive / Lottie / WebView / Ruffle，除非新阶段 Spec 明确论证并获确认。
 
 ---
+
+## 16. Phase L.0：个人音乐记忆与 Context Engine（已归档）
+
+- 已完成：服务端个人资料读取、个人候选检索、Context Assembler、个人候选 resolver seeds、DJ prompt 上下文和 MiMo 动态 style TTS。
+- 关键决策仍有效：个人资料放 ignored 的 `server/data/user-profile`；个人歌单只作候选证据，不绕过 provider chain；MiMo 情绪不扩公开 API。
+- 验收证据：`pnpm test:full` 通过；结构烟测显示 `想听开心的歌 -> 稻香`、`给我推荐几首伤心的歌 -> 突然好想你`。
+- 完整归档：`tasks/spec/phase-l0-personal-context-engine.md`。
+
+---
+
+## 17. Phase L.1：Resident DJ Agent（已归档）
+
+- 已完成：简单歌单导入、`qq_songs.json` 纯数组导入、隐式学习文件读取、Resident DJ 内部智能体纯函数、curated candidates resolver 主路径、深聊边播 prompt、Critic 文案审查。
+- 关键决策仍有效：`PersonalContext.preferredTitles` 只作兼容 evidence；非明确点歌主路径必须先产出 `DjTurnPlan` 和 `CuratedCandidate[]`，再交给 provider chain 解析。
+- 验收证据：`pnpm test` 通过；`pnpm test:full` 通过；server 10 个测试文件 / 40 个测试通过，结构烟测和强制无曲目分支通过。
+- 完整归档：`tasks/spec/phase-l1-resident-dj-agent.md`。
+
+---
+
+## 18. Phase L.2：测试整理 + Resident DJ 并行多智能体升级（当前阶段）
+
+### 18.1 目标
+
+- 不删除 L.1 新增测试；这些测试保护“简单歌单、个人上下文、不固定映射、Critic 拦截”等核心行为。
+- 用共享测试工厂减少重复夹具，让 `prompt.test.ts`、`personal/*.test.ts` 更短、更清楚。
+- Resident DJ 内部升级为混合并行架构：轻量 agent 走 `Promise.all`，音乐源多 seed 解析走有限并发，LX 用户源继续用现有 child_process worker 隔离。
+- 不改公开 `/api/chat`、`ChatResponse`、WS 事件结构；agent timing 和 fallback reason 只留在内部结构、日志或测试中。
+
+### 18.2 实现决策
+
+- 新增测试工厂模块，提供 `trackFactory`、`musicSectionFactory`、`personalContextFactory`、`userProfileFactory` 这类稳定构造函数。
+- `buildResidentDjPlan` 保持同步兼容入口；新增异步 orchestrator 作为主链路入口，内部先串行 Design Director，再并行 Memory / Mood / Insight / Recent behavior，最后策展和审查。
+- 单个辅助 agent 失败时不阻塞播放；orchestrator 记录失败 reason，降级为少证据推荐。
+- 多 seed 解析默认并发 2；同一个 seed 内仍按 provider chain 顺序兜底，避免破坏现有 LX / fallback 语义。
+
+### 18.3 验证
+
+- `pnpm test` 必须通过。
+- 本阶段影响 `/api/chat`、音乐解析和队列提交，完成后必须跑 `pnpm test:full`。
+- 新增测试覆盖：并行 agent 某一路失败仍返回候选；多 seed 并发不重复提交；并发上限生效；测试 helper 整理后 L.1 行为断言不丢。

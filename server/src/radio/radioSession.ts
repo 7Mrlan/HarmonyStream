@@ -5,6 +5,8 @@
  */
 
 import type { Track } from '@claudio/api';
+import type { MusicSearchSeed } from '../music/types.js';
+import type { TtsStyle } from '../tts/types.js';
 import { resolveTracksForChat } from '../music/musicResolver.js';
 import { isSameTitle } from '../music/titleMatch.js';
 import type { MusicRequestKind } from './intentParser.js';
@@ -14,9 +16,11 @@ export interface RadioSessionIntent {
   userText: string;
   searchText: string;
   preferredTitles: string[];
+  preferredSeeds: MusicSearchSeed[];
   requestKind: MusicRequestKind;
   targetQueueSize: number;
   voiceEnabledAtChat: boolean;
+  ttsStyle?: TtsStyle;
 }
 
 export interface RadioSessionMemory {
@@ -53,6 +57,7 @@ export function buildSessionIntent(intent: RadioSessionIntent): RadioSessionInte
   return {
     ...intent,
     preferredTitles: [...intent.preferredTitles],
+    preferredSeeds: intent.preferredSeeds.map((seed) => ({ ...seed })),
   };
 }
 
@@ -106,7 +111,10 @@ export function maybeRefillQueue(input: MaybeRefillQueueInput): void {
  * 执行真实续推。
  * 这里只做音乐解析和去重，不生成新意图，不等待主播文案。
  */
-async function runQueueRefill(input: MaybeRefillQueueInput, intent: RadioSessionIntent): Promise<void> {
+async function runQueueRefill(
+  input: MaybeRefillQueueInput,
+  intent: RadioSessionIntent,
+): Promise<void> {
   try {
     const missing = Math.max(0, intent.targetQueueSize - input.getRemainingQueueCount());
     if (missing <= 0) return;
@@ -114,6 +122,7 @@ async function runQueueRefill(input: MaybeRefillQueueInput, intent: RadioSession
     const plan = await resolveTracksForChat({
       userText: intent.searchText || intent.userText,
       preferredTitles: intent.preferredTitles,
+      preferredSeeds: intent.preferredSeeds,
       limit: Math.max(missing + input.memory.seenTrackKeys.size, intent.targetQueueSize),
     });
     if (!input.isIntentCurrent(intent)) return;

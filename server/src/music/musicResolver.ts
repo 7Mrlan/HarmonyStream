@@ -11,20 +11,18 @@ import type { Track } from '@claudio/api';
 import { env } from '../env.js';
 import { createMusicCache, type MusicCache } from './cache.js';
 import { cloneTrack, FALLBACK_TRACKS } from './fallbackCatalog.js';
-import {
-  measureProviderCall,
-  recordCacheHit,
-  recordFallback,
-} from './metrics.js';
+import { measureProviderCall, recordCacheHit, recordFallback } from './metrics.js';
 import { getProviderChain } from './providerRegistry.js';
 import { isSameTitle } from './titleMatch.js';
-import type { MusicProvider, ResolvedMusicPlan } from './types.js';
+import type { MusicProvider, MusicSearchSeed, ResolvedMusicPlan } from './types.js';
 
 export interface ResolveTracksForChatInput {
   /* 用户原始输入。 */
   userText: string;
   /* LLM 推荐曲名，推荐后重排时使用。 */
   preferredTitles?: string[];
+  /* 个人资料候选；内部用 artist 构造更准的搜索词，不改变 provider contract。 */
+  preferredSeeds?: MusicSearchSeed[];
   /* 最大队列长度。 */
   limit?: number;
   /* 是否允许把静态 fallback 曲目作为播放结果。用户点歌默认不允许。 */
@@ -52,11 +50,13 @@ export function shutdownMusicResolver(): void {
 export async function resolveTracksForChat({
   userText,
   preferredTitles,
+  preferredSeeds,
   limit = 3,
   allowFallback = false,
 }: ResolveTracksForChatInput): Promise<ResolvedMusicPlan> {
-  if (preferredTitles && preferredTitles.length > 1 && limit > 1) {
-    return resolvePreferredTitleBatch({ userText, preferredTitles, limit, allowFallback });
+  const seeds = normalizePreferredSeeds(preferredSeeds, preferredTitles);
+  if (seeds.length > 1 && limit > 1) {
+    return resolvePreferredSeedBatch({ userText, preferredSeeds: seeds, limit, allowFallback });
   }
 
   const chain = getProviderChain();
@@ -78,7 +78,7 @@ export async function resolveTracksForChat({
       const tracks = await measureProviderCall(provider.manifest.id, () =>
         provider.searchPlayableTracks({
           userText,
-          preferredTitles,
+          preferredTitles: preferredTitles ?? seeds.map((seed) => seed.title),
           limit,
         }),
       );
@@ -90,11 +90,19 @@ export async function resolveTracksForChat({
         continue;
       }
 
-      const ordered = orderTracksByPreferredTitles(normalized, preferredTitles);
+      const ordered = orderTracksByPreferredTitles(
+        normalized,
+        preferredTitles ?? seeds.map((seed) => seed.title),
+      );
       writeCache(provider, userText, preferredTitles, limit, ordered);
-      return buildPlan(provider, ordered, provider.manifest.tier === 'fallback', reasons.length === 0
-        ? `${provider.manifest.id} 返回 ${ordered.length} 首可播放曲目`
-        : `${provider.manifest.id} 返回 ${ordered.length} 首；前序回退：${reasons.join('；')}`);
+      return buildPlan(
+        provider,
+        ordered,
+        provider.manifest.tier === 'fallback',
+        reasons.length === 0
+          ? `${provider.manifest.id} 返回 ${ordered.length} 首可播放曲目`
+          : `${provider.manifest.id} 返回 ${ordered.length} 首；前序回退：${reasons.join('；')}`,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : '未知错误';
       recordFallback(provider.manifest.id);
@@ -123,33 +131,39 @@ export async function resolveTracksForChat({
 }
 
 /*
- * 多首推荐时逐个 preferred title 解析。
+ * 多首推荐时逐个 preferred seed 解析。
  * 这样能避免音乐源围绕单个关键词返回多个版本，保证情绪 / 歌单请求更像真实队列。
  */
-async function resolvePreferredTitleBatch({
+async function resolvePreferredSeedBatch({
   userText,
-  preferredTitles,
+  preferredSeeds,
   limit,
   allowFallback,
 }: Required<Pick<ResolveTracksForChatInput, 'userText' | 'limit' | 'allowFallback'>> & {
-  preferredTitles: string[];
+  preferredSeeds: MusicSearchSeed[];
 }): Promise<ResolvedMusicPlan> {
   const collected: Track[] = [];
   const reasons: string[] = [];
 
-  for (const title of preferredTitles) {
+  for (const seed of preferredSeeds) {
     if (collected.length >= limit) break;
+    const searchText = [seed.title, seed.artist].filter(Boolean).join(' ');
     const plan = await resolveTracksForChat({
-      userText: title,
-      preferredTitles: [title],
+      userText: searchText || seed.title,
+      preferredTitles: [seed.title],
       limit: 1,
       allowFallback,
     });
-    reasons.push(`${title}: ${plan.reason}`);
+    reasons.push(`${searchText || seed.title}: ${plan.reason}`);
 
     for (const track of plan.tracks) {
       if (collected.length >= limit) break;
-      if (collected.some((item) => getTrackKey(item) === getTrackKey(track) || isSameTitle(item.title, track.title))) {
+      if (
+        collected.some(
+          (item) =>
+            getTrackKey(item) === getTrackKey(track) || isSameTitle(item.title, track.title),
+        )
+      ) {
         continue;
       }
       collected.push(cloneTrack(track));
@@ -167,10 +181,31 @@ async function resolvePreferredTitleBatch({
 
   return resolveTracksForChat({
     userText,
-    preferredTitles: preferredTitles.slice(0, 1),
+    preferredSeeds: preferredSeeds.slice(0, 1),
+    preferredTitles: preferredSeeds.slice(0, 1).map((seed) => seed.title),
     limit,
     allowFallback,
   });
+}
+
+/* 把 preferredTitles / preferredSeeds 合并为带 artist 的内部搜索种子。 */
+function normalizePreferredSeeds(
+  preferredSeeds: MusicSearchSeed[] | undefined,
+  preferredTitles: string[] | undefined,
+): MusicSearchSeed[] {
+  const seeds = [...(preferredSeeds ?? [])];
+  for (const title of preferredTitles ?? []) {
+    if (!seeds.some((seed) => isSameTitle(seed.title, title))) {
+      seeds.push({ title });
+    }
+  }
+
+  return seeds
+    .map((seed) => ({
+      title: seed.title.trim(),
+      ...(seed.artist?.trim() ? { artist: seed.artist.trim() } : {}),
+    }))
+    .filter((seed) => seed.title.length > 0);
 }
 
 /* 缓存读取。 */
@@ -195,7 +230,11 @@ function writeCache(
 ): void {
   if (provider.manifest.tier === 'fallback') return;
   const ttl = provider.manifest.urlTtlMs ?? env.MUSIC_CACHE_DEFAULT_TTL_MS;
-  resolveCache.set(buildCacheKey(provider, userText, preferredTitles, limit), tracks.map(cloneTrack), ttl);
+  resolveCache.set(
+    buildCacheKey(provider, userText, preferredTitles, limit),
+    tracks.map(cloneTrack),
+    ttl,
+  );
 }
 
 /* 组合缓存 key：provider id + 版本 + 归一化关键词 + limit。 */
@@ -257,7 +296,10 @@ function getTrackKey(track: Track): string {
  * LLM 给出 play 后，优先把同名曲目排到队首。
  * 匹配失败时保持 provider 原顺序，避免丢失可播放结果。
  */
-function orderTracksByPreferredTitles(tracks: Track[], preferredTitles: string[] | undefined): Track[] {
+function orderTracksByPreferredTitles(
+  tracks: Track[],
+  preferredTitles: string[] | undefined,
+): Track[] {
   if (!preferredTitles || preferredTitles.length === 0) return tracks.map(cloneTrack);
 
   const ordered: Track[] = [];

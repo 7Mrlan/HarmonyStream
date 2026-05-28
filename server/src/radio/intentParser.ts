@@ -14,6 +14,10 @@ export interface ExplicitSongRequest {
 export interface GenreRecommendationRequest {
   title: string;
   artist: string;
+  tracks: Array<{
+    title: string;
+    artist: string;
+  }>;
   preferredTitles: string[];
   mood: string;
 }
@@ -181,6 +185,7 @@ export function parseGenreRecommendationRequest(text: string): GenreRecommendati
   return {
     title: primary.title,
     artist: primary.artist,
+    tracks: matched.tracks,
     preferredTitles: matched.tracks.map((track) => track.title),
     mood: matched.mood,
   };
@@ -293,6 +298,7 @@ function buildRecommendationRequest(recommendation: typeof DEFAULT_RECOMMENDATIO
   return {
     title: primary?.title ?? '',
     artist: primary?.artist ?? '',
+    tracks: recommendation.tracks,
     preferredTitles: recommendation.tracks.map((track) => track.title),
     mood: recommendation.mood,
   };

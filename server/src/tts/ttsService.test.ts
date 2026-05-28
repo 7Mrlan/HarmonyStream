@@ -24,4 +24,32 @@ describe('ttsService cache key', () => {
 
     expect(requestKey).not.toBe(actualVoiceKey);
   });
+
+  it('区分动态 TTS style，避免不同情绪复用同一音频', () => {
+    const brightKey = buildCacheKey('mimo', '今晚听这首', '白桦', 1, 'bright-v1');
+    const lateNightKey = buildCacheKey('mimo', '今晚听这首', '白桦', 1, 'late-night-v1');
+
+    expect(brightKey).not.toBe(lateNightKey);
+  });
+
+  it('区分 provider 静态 cache scope，避免模型或全局 style 变更后命中旧音频', () => {
+    const oldScopeKey = buildCacheKey(
+      'mimo',
+      '今晚听这首',
+      '白桦',
+      1,
+      'neutral-v1',
+      'mimo-v2.5-tts:old',
+    );
+    const newScopeKey = buildCacheKey(
+      'mimo',
+      '今晚听这首',
+      '白桦',
+      1,
+      'neutral-v1',
+      'mimo-v2.5-tts:new',
+    );
+
+    expect(oldScopeKey).not.toBe(newScopeKey);
+  });
 });

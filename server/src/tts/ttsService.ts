@@ -15,6 +15,7 @@ import { createMusicCache, type MusicCache } from '../music/cache.js';
 import { recordCacheHit, recordFallback } from '../music/metrics.js';
 import { deleteAudio, getAudio, putAudio } from './audioStore.js';
 import { getTtsProviderChain } from './providerRegistry.js';
+import type { TtsStyle } from './types.js';
 
 export interface TtsRequest {
   /* 待合成文本。 */
@@ -23,6 +24,8 @@ export interface TtsRequest {
   voice?: string;
   /* 语速，可选。 */
   speed?: number;
+  /* 动态语气，可选；不进入公开 API。 */
+  style?: TtsStyle;
 }
 
 export interface TtsResolveResult {
@@ -69,12 +72,22 @@ export async function synthesizeForChat(req: TtsRequest): Promise<TtsResolveResu
   if (!text) return null;
 
   const requestedVoice = req.voice?.trim();
-  const speed = typeof req.speed === 'number' ? req.speed : 1;
+  const style = req.style;
+  const speed = typeof req.speed === 'number' ? req.speed : (style?.speed ?? 1);
 
   const chain = getTtsProviderChain();
   for (const provider of chain) {
     const voice = requestedVoice || provider.manifest.defaultVoice;
-    const provisionalCacheKey = buildCacheKey(provider.manifest.id, text, voice, speed);
+    const cacheScope = provider.manifest.cacheScope ?? provider.manifest.version;
+    const styleKey = style?.key ?? 'neutral-v1';
+    const provisionalCacheKey = buildCacheKey(
+      provider.manifest.id,
+      text,
+      voice,
+      speed,
+      styleKey,
+      cacheScope,
+    );
     const cachedEntry = idCache.get(provisionalCacheKey);
     if (cachedEntry) {
       const cached = getAudio(cachedEntry.id);
@@ -89,8 +102,15 @@ export async function synthesizeForChat(req: TtsRequest): Promise<TtsResolveResu
     }
 
     try {
-      const result = await provider.synthesize({ text, voice, speed });
-      const cacheKey = buildCacheKey(provider.manifest.id, text, result.voice, speed);
+      const result = await provider.synthesize({ text, voice, speed, ...(style ? { style } : {}) });
+      const cacheKey = buildCacheKey(
+        provider.manifest.id,
+        text,
+        result.voice,
+        speed,
+        styleKey,
+        cacheScope,
+      );
       const id = putAudio(result.audio, result.mime, env.TTS_CACHE_TTL_MS);
       const cacheEntry = { id, mime: result.mime, providerId: provider.manifest.id };
       writeIdCache(cacheKey, cacheEntry);
@@ -110,9 +130,16 @@ export async function synthesizeForChat(req: TtsRequest): Promise<TtsResolveResu
 }
 
 /* 暴露 cache key 构建函数，便于后续单元测试。 */
-export function buildCacheKey(providerId: string, text: string, voice: string, speed: number): string {
+export function buildCacheKey(
+  providerId: string,
+  text: string,
+  voice: string,
+  speed: number,
+  styleKey = 'neutral-v1',
+  cacheScope = 'default',
+): string {
   return createHash('sha1')
-    .update(`${providerId}|${text}|${voice}|${speed}`)
+    .update(`${providerId}|${cacheScope}|${text}|${voice}|${speed}|${styleKey}`)
     .digest('hex')
     .slice(0, 16);
 }
