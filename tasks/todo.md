@@ -14,7 +14,7 @@
 - 涉及 `packages/*` 后，如果页面没变，先按 Metro / 浏览器缓存陷阱排查。
 - 所有“运行 / 重启 / 打开 / 点击”步骤必须标明执行载体。
 - Claudio 永远是音乐电台：评论区 / 对话输入是点歌和推荐入口，不新增独立搜索框；LLM 主播负责理解意图、策划选曲、讲短背景和过渡。
-- Claudio 的核心不是通用点歌和短文案，而是个人音乐记忆驱动的 AI 电台；当前进入 Phase L.2 测试整理 + Resident DJ 并行多智能体升级。
+- Claudio 的核心不是通用点歌和短文案，而是个人音乐记忆驱动的 AI 电台；Phase L.2 测试整理 + Resident DJ 并行多智能体升级已完成。
 - GitHub 侧 Phase Pet 当前是设计草案和注释占位，`PetCompanion` 组件尚未实际存在；不能当作已完成 prototype。
 - 默认音乐源使用已验证的 LX-compatible 链路：huibq 源 raw URL + Kuwo 候选搜索；用户仍可通过 env 配置覆盖源脚本或候选 resolver。
 
@@ -40,7 +40,7 @@
 - [x] Phase F：后台播放、锁屏控制、APK release、长时运行等产品化任务
 - [x] Phase L.0：个人音乐记忆与 Context Engine
 - [x] Phase L.1：Resident DJ Agent 服务端闭环
-- [ ] Phase L.2：测试整理 + Resident DJ 并行多智能体升级
+- [x] Phase L.2：测试整理 + Resident DJ 并行多智能体升级
 - [ ] Phase M：用户音源导入 UI
 - [ ] Phase Pet：Claudio 灵动系统伴侣 prototype（GitHub 侧已合入设计草案，代码未实装）
 - [ ] Phase K：歌曲像素海报
@@ -185,14 +185,18 @@
 ## 当前任务 · Phase L.2 测试整理 + Resident DJ 并行多智能体升级
 
 - [x] 写入 `tasks/spec.md` 当前阶段真源：测试整合保留、异步 agent orchestrator、音乐有限并发、内部观测边界。
-- [ ] 新增共享测试工厂并替换重复 `track / section / context / profile` 构造。
-- [ ] 新增 Resident DJ 异步 orchestrator：Design Director 串行，Memory / Mood / Insight / Recent behavior 并行。
-- [ ] 将 `/api/chat` 非明确点歌路径接入异步 orchestrator，保留同步 `buildResidentDjPlan` 兼容测试入口。
-- [ ] 将多 seed 音乐解析改为默认并发 2，保持单 seed 内 provider chain 顺序兜底。
-- [ ] 添加并行失败降级、并发上限、去重提交测试。
-- [ ] 终端命令：运行 `pnpm test`。
-- [ ] 终端命令：运行 `pnpm test:full`。
+- [x] 新增共享测试工厂并替换重复 `track / section / context / profile` 构造。
+- [x] 新增 Resident DJ 异步 orchestrator：Design Director 串行，Memory / Mood / Insight / Recent behavior 并行。
+- [x] 将 `/api/chat` 非明确点歌路径接入异步 orchestrator，保留同步 `buildResidentDjPlan` 兼容测试入口。
+- [x] 将多 seed 音乐解析改为默认并发 2，保持单 seed 内 provider chain 顺序兜底。
+- [x] 添加并行失败降级、并发上限、去重提交测试。
+- [x] 终端命令：运行 `pnpm test`。
+- [x] 终端命令：运行 `pnpm test:full`。
 
 ### Phase L.2 Review
 
-- 待补：实现结果、验证输出、遗留风险。
+- 结果：测试文件全部保留，只抽共享工厂；Resident DJ 主链路改用异步 orchestrator，内部 diagnostics 记录 agent timing / fallback reason。
+- 结果：多 seed 解析默认并发 2，单 seed provider chain 顺序不变，避免打爆 LX / Kuwo / 外部源。
+- 验证：终端命令 `pnpm test` 通过；typecheck 全部通过，server 11 个测试文件 / 43 个测试通过。
+- 验证：终端命令 `pnpm test:full` 通过；server build、结构烟测和强制无曲目分支均通过。
+- 遗留：自动学习事件落盘、移动端导入 UI、重 CPU 大歌库分析 worker 留到后续阶段。

@@ -1,20 +1,21 @@
 import type { ChatResponse, Track } from '@claudio/api';
 import { describe, expect, it } from 'vitest';
+import {
+  createMusicSection,
+  createPersonalContext,
+  createTestTrack,
+} from '../test/factories.js';
 import type { MusicLibrarySection, PersonalContext } from './profileTypes.js';
 import {
   applyCriticReportToResponse,
   buildResidentDjPlan,
+  buildResidentDjPlanAsync,
   reviewDjHostResponse,
 } from './residentDj.js';
 
 /* 构造测试曲目。 */
 function track(title: string, artist?: string): Track {
-  return {
-    id: `${artist ?? 'artist'}-${title}`,
-    url: `https://example.com/${encodeURIComponent(title)}.mp3`,
-    title,
-    ...(artist ? { artist } : {}),
-  };
+  return createTestTrack({ title, ...(artist ? { artist } : {}) });
 }
 
 /* 构造简单歌单分组。 */
@@ -24,20 +25,12 @@ function section(
   tracks: Array<{ name: string; artist?: string }>,
   description?: string,
 ): MusicLibrarySection {
-  return {
-    id: `section-${name}`,
+  return createMusicSection({
     name,
-    ...(description ? { description } : {}),
-    sourceFile: 'simple-playlists.json',
     inferredTags,
-    tracks: tracks.map((item) => ({
-      title: item.name,
-      ...(item.artist ? { artist: item.artist } : {}),
-      sectionName: name,
-      sourceFile: 'simple-playlists.json',
-      inferredTags,
-    })),
-  };
+    tracks,
+    ...(description ? { description } : {}),
+  });
 }
 
 /* 构造 PersonalContext，聚焦 Resident DJ 纯函数输入。 */
@@ -47,29 +40,13 @@ function context(
   recentTracks: Track[] = [],
   listeningEvents: PersonalContext['listeningEvents'] = [],
 ): PersonalContext {
-  return {
-    profileSource: sections.length > 0 ? 'user-data' : 'empty',
-    hasUserData: sections.length > 0,
-    tasteSummary: '偏好低刺激、分时段和不抢注意力的音乐。',
-    environment: {
-      now,
-      hour: now.getHours(),
-      timeSlot: now.getHours() < 12 ? 'morning' : now.getHours() >= 22 ? 'late-night' : 'daytime',
-    },
-    candidates: [],
-    librarySections: sections,
-    libraryInsights: [],
-    listeningEvents,
-    djMemory: [],
+  return createPersonalContext({
+    sections,
+    now,
     recentTracks,
-    preferredTitles: [],
-    promptLines: [],
-    ttsStyle: {
-      key: 'neutral-v1',
-      emotion: '自然',
-      styleInstruction: '语气自然',
-    },
-  };
+    listeningEvents,
+    tasteSummary: '偏好低刺激、分时段和不抢注意力的音乐。',
+  });
 }
 
 describe('Resident DJ plan', () => {
@@ -216,6 +193,32 @@ describe('Resident DJ plan', () => {
 
     expect(plan.curatedCandidates[0]?.title).toBe('Thrown');
     expect(plan.evidence.some((item) => item.type === 'event')).toBe(true);
+  });
+
+  it('异步 orchestrator 某个辅助 agent 失败时仍返回候选和降级原因', async () => {
+    const plan = await buildResidentDjPlanAsync({
+      userText: '上午随便来点',
+      requestKind: 'range',
+      personalContext: context(
+        [
+          section('上午轻音乐', ['清晨', '低刺激'], [
+            { name: 'Open Eye Signal', artist: 'Jon Hopkins' },
+          ]),
+        ],
+        new Date('2026-05-28T09:00:00+08:00'),
+      ),
+      agents: {
+        memoryLibrarian: () => {
+          throw new Error('memory source down');
+        },
+      },
+    });
+
+    expect(plan.curatedCandidates[0]?.title).toBe('Open Eye Signal');
+    expect(plan.diagnostics?.fallbackReasons.join('\n')).toContain('memory source down');
+    expect(plan.diagnostics?.timings.some((timing) => timing.agent === 'memory-librarian')).toBe(
+      true,
+    );
   });
 
   it('Critic 会拦截假装懂用户和治疗承诺，并降级主播文案', () => {

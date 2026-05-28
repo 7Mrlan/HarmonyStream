@@ -1,32 +1,11 @@
-import type { Track } from '@claudio/api';
 import { describe, expect, it } from 'vitest';
-import type { PersonalContext } from '../personal/profileTypes.js';
+import { createPersonalContext, createTestTrack } from '../test/factories.js';
 import { buildDjPrompt, buildMusicIntentPrompt } from './prompt.js';
 
-function track(title: string): Track {
-  return {
-    id: title,
-    url: `https://example.com/${title}.mp3`,
-    title,
-  };
-}
-
-function personalContext(hasUserData: boolean): PersonalContext {
-  return {
-    profileSource: hasUserData ? 'user-data' : 'empty',
+function promptContext(hasUserData: boolean) {
+  return createPersonalContext({
     hasUserData,
     tasteSummary: hasUserData ? '喜欢明亮但不吵的华语流行' : '',
-    environment: {
-      now: new Date('2026-05-28T09:00:00+08:00'),
-      hour: 9,
-      timeSlot: 'morning',
-    },
-    candidates: [],
-    librarySections: [],
-    libraryInsights: [],
-    listeningEvents: [],
-    djMemory: [],
-    recentTracks: [],
     preferredTitles: hasUserData ? ['金风玉露'] : [],
     promptLines: hasUserData
       ? ['资料状态：有本机用户音乐资料', '个人候选：金风玉露 / 房东的猫（开心 规则命中 明亮）']
@@ -34,12 +13,7 @@ function personalContext(hasUserData: boolean): PersonalContext {
           '资料状态：暂无本机用户音乐资料',
           '个人候选：无命中，禁止假装了解用户资料，只讲本轮听感。',
         ],
-    ttsStyle: {
-      key: 'bright-v1',
-      emotion: '明亮',
-      styleInstruction: '语气更明亮一点',
-    },
-  };
+  });
 }
 
 describe('llm prompt personal context', () => {
@@ -49,10 +23,10 @@ describe('llm prompt personal context', () => {
       modelDisplayName: 'DeepSeek',
       playbackState: 'playing',
       currentTrack: null,
-      selectedTrack: track('金风玉露'),
-      candidateTracks: [track('金风玉露')],
+      selectedTrack: createTestTrack('金风玉露'),
+      candidateTracks: [createTestTrack('金风玉露')],
       requestKind: 'range',
-      personalContext: personalContext(true),
+      personalContext: promptContext(true),
     });
 
     const userMessage = messages.at(1)?.content ?? '';
@@ -67,7 +41,7 @@ describe('llm prompt personal context', () => {
       modelDisplayName: 'DeepSeek',
       playbackState: 'idle',
       currentTrack: null,
-      personalContext: personalContext(false),
+      personalContext: promptContext(false),
     });
 
     const userMessage = messages.at(1)?.content ?? '';

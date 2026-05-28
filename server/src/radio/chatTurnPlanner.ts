@@ -16,7 +16,7 @@ import { assemblePersonalContext } from '../personal/contextAssembler.js';
 import {
   applyCriticReportToResponse,
   attachResidentDjPlanToPersonalContext,
-  buildResidentDjPlan,
+  buildResidentDjPlanAsync,
   curatedCandidatesToSeeds,
   curatedCandidatesToTitles,
   reviewDjHostResponse,
@@ -95,7 +95,7 @@ export async function planChatTurn(
   });
   const residentDjPlan = explicitRequest
     ? null
-    : buildResidentDjPlan({
+    : await buildResidentDjPlanAsync({
         userText: text,
         personalContext,
         requestKind,
@@ -103,6 +103,11 @@ export async function planChatTurn(
   const promptPersonalContext = residentDjPlan
     ? attachResidentDjPlanToPersonalContext(personalContext, residentDjPlan)
     : personalContext;
+  if (residentDjPlan?.diagnostics?.fallbackReasons.length) {
+    console.warn(
+      `[resident-dj] agent fallback: ${residentDjPlan.diagnostics.fallbackReasons.join('；')}`,
+    );
+  }
   const musicIntent = explicitRequest
     ? buildExplicitMusicIntent(explicitRequest)
     : residentDjPlan?.curatedCandidates.length

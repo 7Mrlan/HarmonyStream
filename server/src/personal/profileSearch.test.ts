@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { createUserMusicProfile } from '../test/factories.js';
 import { searchPersonalProfile } from './profileSearch.js';
 import type { UserMusicProfile } from './profileTypes.js';
 
 function profile(): UserMusicProfile {
-  return {
-    source: 'user-data',
-    loadedFiles: ['playlists.json'],
+  return createUserMusicProfile({
     tasteSummary: '喜欢清爽、个人化、有一点记忆点的华语流行。',
     tracks: [
       {
@@ -28,10 +27,6 @@ function profile(): UserMusicProfile {
         weight: 1,
       },
     ],
-    librarySections: [],
-    libraryInsights: [],
-    listeningEvents: [],
-    djMemory: [],
     moodRules: [
       {
         mood: '开心',
@@ -69,7 +64,7 @@ function profile(): UserMusicProfile {
         },
       },
     ],
-  };
+  });
 }
 
 describe('searchPersonalProfile', () => {
@@ -112,14 +107,9 @@ describe('searchPersonalProfile', () => {
     const result = searchPersonalProfile({
       userText: '想听开心的歌',
       profile: {
-        source: 'empty',
-        loadedFiles: [],
+        ...createUserMusicProfile({ source: 'empty', loadedFiles: [] }),
         tasteSummary: '',
         tracks: [],
-        librarySections: [],
-        libraryInsights: [],
-        listeningEvents: [],
-        djMemory: [],
         moodRules: [],
         routines: [],
       },

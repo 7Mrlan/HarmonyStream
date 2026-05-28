@@ -1,19 +1,11 @@
-import type { Track } from '@claudio/api';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { createTestTrack } from '../test/factories.js';
 import { assemblePersonalContext } from './contextAssembler.js';
 
 let tempDirs: string[] = [];
-
-function track(title: string): Track {
-  return {
-    id: `track-${title}`,
-    url: `https://example.com/${title}.mp3`,
-    title,
-  };
-}
 
 async function createProfileDir(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'claudio-context-'));
@@ -53,8 +45,8 @@ describe('assemblePersonalContext', () => {
 
     const context = await assemblePersonalContext({
       userText: '想听开心的歌',
-      currentTrack: track('上一首'),
-      recentTracks: [track('刚听过')],
+      currentTrack: createTestTrack('上一首'),
+      recentTracks: [createTestTrack('刚听过')],
       now: new Date('2026-05-28T09:00:00+08:00'),
       profileDir: dir,
     });

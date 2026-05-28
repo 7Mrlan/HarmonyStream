@@ -21,6 +21,7 @@ import type {
   PersonalCandidate,
   PersonalContext,
   PlaylistShape,
+  ResidentDjAgentTiming,
   ResidentDjPlan,
   ResidentIntent,
 } from './profileTypes.js';
@@ -32,6 +33,20 @@ export interface BuildResidentDjPlanInput {
   personalContext: PersonalContext;
   /* 本地意图解析出的请求粒度。 */
   requestKind: MusicRequestKind;
+}
+
+export interface BuildResidentDjPlanAsyncInput extends BuildResidentDjPlanInput {
+  /* 测试可注入 agent，生产默认使用本文件内置实现。 */
+  agents?: ResidentDjAgentOverrides;
+  /* 测试可注入时钟，便于断言 timing。 */
+  nowMs?: () => number;
+}
+
+export interface ResidentDjAgentOverrides {
+  memoryLibrarian?: (input: ResidentDjAgentInput) => ScoredSection[] | Promise<ScoredSection[]>;
+  moodCompanion?: (input: ResidentDjAgentInput) => MemoryEvidence[] | Promise<MemoryEvidence[]>;
+  libraryInsightReader?: (input: ResidentDjAgentInput) => MemoryEvidence[] | Promise<MemoryEvidence[]>;
+  recentBehaviorAnalyzer?: (input: ResidentDjAgentInput) => MemoryEvidence[] | Promise<MemoryEvidence[]>;
 }
 
 export interface ReviewDjHostResponseInput {
@@ -51,7 +66,7 @@ interface MoodSignal {
   constraints: string[];
 }
 
-interface ScoredSection {
+export interface ScoredSection {
   section: MusicLibrarySection;
   score: number;
   reason: string;
@@ -64,6 +79,17 @@ interface ScoredTrack {
   reason: string;
   sectionName?: string;
   source: CuratedCandidate['source'];
+}
+
+interface ResidentDjAgentInput {
+  personalContext: PersonalContext;
+  turnPlan: DjTurnPlan;
+  moodSignal: MoodSignal;
+}
+
+interface ResidentDjAgentResult<T> {
+  value: T;
+  timing: ResidentDjAgentTiming;
 }
 
 const SAD_WORDS = ['难过', '伤心', '低落', '崩溃', '难受', '不开心', 'emo', '失落', '撑不住'];
@@ -90,6 +116,90 @@ export function buildResidentDjPlan(input: BuildResidentDjPlanInput): ResidentDj
     curatedCandidates,
     critic,
     promptLines: buildResidentPromptLines(turnPlan, evidence, curatedCandidates, critic),
+  };
+}
+
+/*
+ * 异步 Resident DJ 编排器。
+ * Design Director 先定方向；轻量辅助 agent 并行产出证据，任何单路失败都降级而不阻塞播放。
+ */
+export async function buildResidentDjPlanAsync(
+  input: BuildResidentDjPlanAsyncInput,
+): Promise<ResidentDjPlan> {
+  const nowMs = input.nowMs ?? Date.now;
+  const designStartedAt = nowMs();
+  const moodSignal = readMoodSignal(input.userText);
+  const turnPlan = buildTurnPlan(input, moodSignal);
+  const timings: ResidentDjAgentTiming[] = [
+    {
+      agent: 'design-director',
+      ok: true,
+      elapsedMs: Math.max(0, nowMs() - designStartedAt),
+    },
+  ];
+  const agentInput: ResidentDjAgentInput = {
+    personalContext: input.personalContext,
+    turnPlan,
+    moodSignal,
+  };
+
+  const [sections, moodEvidence, insightEvidence, recentEvidence] = await Promise.all([
+    runResidentAgent(
+      'memory-librarian',
+      () => input.agents?.memoryLibrarian?.(agentInput) ?? rankLibrarySections(input.personalContext, turnPlan),
+      [],
+      nowMs,
+    ),
+    runResidentAgent(
+      'mood-companion',
+      () => input.agents?.moodCompanion?.(agentInput) ?? buildMoodEvidence(moodSignal, turnPlan),
+      [],
+      nowMs,
+    ),
+    runResidentAgent(
+      'library-insight-reader',
+      () => input.agents?.libraryInsightReader?.(agentInput) ?? buildInsightEvidence(input.personalContext),
+      [],
+      nowMs,
+    ),
+    runResidentAgent(
+      'recent-behavior-analyst',
+      () => input.agents?.recentBehaviorAnalyzer?.(agentInput) ?? buildRecentBehaviorEvidence(input.personalContext),
+      [],
+      nowMs,
+    ),
+  ]);
+
+  timings.push(
+    sections.timing,
+    moodEvidence.timing,
+    insightEvidence.timing,
+    recentEvidence.timing,
+  );
+  const fallbackReasons = timings
+    .filter((timing) => !timing.ok && timing.reason)
+    .map((timing) => `${timing.agent}: ${timing.reason}`);
+  const evidence = sortEvidence([
+    ...buildSectionEvidence(sections.value),
+    ...buildTasteEvidence(input.personalContext),
+    ...moodEvidence.value,
+    ...insightEvidence.value,
+    ...recentEvidence.value,
+    ...buildLegacyCandidateEvidence(input.personalContext, turnPlan),
+  ]);
+  const curatedCandidates = curateCandidates(input.personalContext, turnPlan, sections.value);
+  const critic = reviewResidentDjPlan(turnPlan, curatedCandidates, input.personalContext);
+
+  return {
+    turnPlan,
+    evidence,
+    curatedCandidates,
+    critic,
+    promptLines: buildResidentPromptLines(turnPlan, evidence, curatedCandidates, critic),
+    diagnostics: {
+      timings,
+      fallbackReasons,
+    },
   };
 }
 
@@ -349,21 +459,51 @@ function collectMemoryEvidence(
   rankedSections: ScoredSection[],
   turnPlan: DjTurnPlan,
 ): MemoryEvidence[] {
-  const evidence: MemoryEvidence[] = rankedSections.slice(0, 4).map((item) => ({
+  return sortEvidence([
+    ...buildSectionEvidence(rankedSections),
+    ...buildTasteEvidence(personalContext),
+    ...buildInsightEvidence(personalContext),
+    ...buildRecentBehaviorEvidence(personalContext),
+    ...buildLegacyCandidateEvidence(personalContext, turnPlan),
+  ]);
+}
+
+/* 把分组打分转换成证据。 */
+function buildSectionEvidence(rankedSections: ScoredSection[]): MemoryEvidence[] {
+  return rankedSections.slice(0, 4).map((item) => ({
     type: 'section',
     label: item.section.name,
     score: item.score,
     reason: item.reason,
   }));
+}
 
+/* 构造口味摘要证据。 */
+function buildTasteEvidence(personalContext: PersonalContext): MemoryEvidence[] {
   if (personalContext.tasteSummary) {
-    evidence.push({
+    return [{
       type: 'taste',
       label: '口味摘要',
       score: 2,
       reason: personalContext.tasteSummary.slice(0, 80),
-    });
+    }];
   }
+  return [];
+}
+
+/* Mood Companion 输出陪伴尺度证据。 */
+function buildMoodEvidence(moodSignal: MoodSignal, turnPlan: DjTurnPlan): MemoryEvidence[] {
+  return [{
+    type: 'mood',
+    label: turnPlan.comfortMode,
+    score: 3,
+    reason: `comfort=${moodSignal.comfortMode}，curve=${moodSignal.energyCurve}`,
+  }];
+}
+
+/* Library Insight Reader 输出洞察和长期记忆证据。 */
+function buildInsightEvidence(personalContext: PersonalContext): MemoryEvidence[] {
+  const evidence: MemoryEvidence[] = [];
   for (const insight of personalContext.libraryInsights.slice(0, 3)) {
     evidence.push({
       type: 'insight',
@@ -380,6 +520,12 @@ function collectMemoryEvidence(
       reason: memory.summary,
     });
   }
+  return evidence;
+}
+
+/* Recent Behavior Analyst 输出最近播放和用户行为证据。 */
+function buildRecentBehaviorEvidence(personalContext: PersonalContext): MemoryEvidence[] {
+  const evidence: MemoryEvidence[] = [];
   if (personalContext.recentTracks.length > 0) {
     evidence.push({
       type: 'recent',
@@ -396,6 +542,15 @@ function collectMemoryEvidence(
       reason: formatListeningEvent(event),
     });
   }
+  return evidence;
+}
+
+/* 从旧个人候选池收集兼容证据。 */
+function buildLegacyCandidateEvidence(
+  personalContext: PersonalContext,
+  turnPlan: DjTurnPlan,
+): MemoryEvidence[] {
+  const evidence: MemoryEvidence[] = [];
   for (const candidate of personalContext.candidates.slice(0, 3)) {
     evidence.push({
       type: 'track',
@@ -404,8 +559,44 @@ function collectMemoryEvidence(
       reason: candidate.reasons.join('；') || `可作为 ${turnPlan.comfortMode} 的个人候选证据`,
     });
   }
+  return evidence;
+}
 
+/* 按证据分排序并裁剪。 */
+function sortEvidence(evidence: MemoryEvidence[]): MemoryEvidence[] {
   return evidence.sort((left, right) => right.score - left.score).slice(0, 8);
+}
+
+/* 运行一个 Resident DJ agent，失败时回退默认值并记录 timing。 */
+async function runResidentAgent<T>(
+  agent: string,
+  task: () => T | Promise<T>,
+  fallbackValue: T,
+  nowMs: () => number,
+): Promise<ResidentDjAgentResult<T>> {
+  const startedAt = nowMs();
+  try {
+    const value = await task();
+    return {
+      value,
+      timing: {
+        agent,
+        ok: true,
+        elapsedMs: Math.max(0, nowMs() - startedAt),
+      },
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : '未知错误';
+    return {
+      value: fallbackValue,
+      timing: {
+        agent,
+        ok: false,
+        elapsedMs: Math.max(0, nowMs() - startedAt),
+        reason,
+      },
+    };
+  }
 }
 
 /*

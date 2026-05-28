@@ -8,10 +8,10 @@
 
 ## 当前活跃索引
 
-- 当前主线：AI 电台进入 Phase L.2，整理 L.1 测试夹具，并把 Resident DJ 升级为混合并行智能体编排。
+- 当前主线：AI 电台已完成 Phase L.2 测试整理 + Resident DJ 并行多智能体升级；下一阶段待确认。
 - 已完成：Phase A 后端 API 骨架；Phase B 移动端接入；Phase C LLM 主播；Phase C+ 等待体验；Phase D 音乐来源；Phase D.5 性能地基；Phase E TTS 入声；Phase F.0 SDK 56 依赖升级；Phase F.A 音频会话/后台权限；Phase F.B WS 心跳/重连；Phase F.C 锁屏 metadata 代码接线；Phase F.D APK 构建入口；Phase F.E 服务端 graceful shutdown；Phase J 队列与推荐体验收口；Phase J.1 radioState 编排拆分；Phase J.2 chatTurnPlanner 抽离；Phase J.3 自动化测试入口；Phase L.0 个人音乐记忆与 Context Engine。
-- 当前阶段：Phase L.2 正在实现；用户已明确要求 “PLEASE IMPLEMENT THIS PLAN”，视为本阶段完整方案确认。
-- 当前 HARD-GATE：Phase L.2 不删除 L.1 保护性测试，不扩公开 API，不新增移动端 UI，不把普通网络 API 强行改成 worker。
+- 当前阶段：Phase L.2 已完成并归档；当前没有新的实现阶段获得确认。
+- 当前 HARD-GATE：下一阶段如果进入移动端导入 UI、自动学习落盘或宠物实现，仍需重新写当前现状与文件级计划。
 - 当前边界：BYO-LLM 用户自配 key/baseUrl/model 单独作为 Phase F.5，不混入 Phase F 锁屏 / APK 验收。
 
 ---
@@ -172,6 +172,7 @@
 | Phase F.0   | 完成 | Expo SDK 56 / React 19.2.6 / RN 0.85.3 / TypeScript 6.0.3 升级完成；NativeWind 类型 shim 和临时 override 已清理。                                              |
 | Phase L.0   | 完成 | 服务端个人资料层、个人候选检索、Context Assembler、DJ prompt 上下文、MiMo 动态 style TTS 已落地；完整历史见 `tasks/spec/phase-l0-personal-context-engine.md`。 |
 | Phase L.1   | 完成 | Resident DJ 服务端闭环已落地：简单歌单、隐式学习文件读取、curated candidates、深聊边播和 Critic；完整历史见 `tasks/spec/phase-l1-resident-dj-agent.md`。       |
+| Phase L.2   | 完成 | L.1 测试夹具已整理，Resident DJ 异步 orchestrator 与多 seed 有限并发解析已落地；完整历史见 `tasks/spec/phase-l2-resident-dj-parallel-agents.md`。              |
 
 ---
 
@@ -413,24 +414,10 @@
 
 ---
 
-## 18. Phase L.2：测试整理 + Resident DJ 并行多智能体升级（当前阶段）
+## 18. Phase L.2：测试整理 + Resident DJ 并行多智能体升级（已归档）
 
-### 18.1 目标
-
-- 不删除 L.1 新增测试；这些测试保护“简单歌单、个人上下文、不固定映射、Critic 拦截”等核心行为。
-- 用共享测试工厂减少重复夹具，让 `prompt.test.ts`、`personal/*.test.ts` 更短、更清楚。
-- Resident DJ 内部升级为混合并行架构：轻量 agent 走 `Promise.all`，音乐源多 seed 解析走有限并发，LX 用户源继续用现有 child_process worker 隔离。
-- 不改公开 `/api/chat`、`ChatResponse`、WS 事件结构；agent timing 和 fallback reason 只留在内部结构、日志或测试中。
-
-### 18.2 实现决策
-
-- 新增测试工厂模块，提供 `trackFactory`、`musicSectionFactory`、`personalContextFactory`、`userProfileFactory` 这类稳定构造函数。
-- `buildResidentDjPlan` 保持同步兼容入口；新增异步 orchestrator 作为主链路入口，内部先串行 Design Director，再并行 Memory / Mood / Insight / Recent behavior，最后策展和审查。
-- 单个辅助 agent 失败时不阻塞播放；orchestrator 记录失败 reason，降级为少证据推荐。
-- 多 seed 解析默认并发 2；同一个 seed 内仍按 provider chain 顺序兜底，避免破坏现有 LX / fallback 语义。
-
-### 18.3 验证
-
-- `pnpm test` 必须通过。
-- 本阶段影响 `/api/chat`、音乐解析和队列提交，完成后必须跑 `pnpm test:full`。
-- 新增测试覆盖：并行 agent 某一路失败仍返回候选；多 seed 并发不重复提交；并发上限生效；测试 helper 整理后 L.1 行为断言不丢。
+- 已完成：L.1 保护性测试保留，重复测试夹具收敛到 `server/src/test/factories.ts`。
+- 已完成：Resident DJ 新增异步 orchestrator，辅助 agent 并行运行，失败时记录内部 diagnostics 并降级。
+- 已完成：多 seed 音乐解析默认并发 2，单 seed 内 provider chain 顺序不变，并增加去重提交纯函数。
+- 验收证据：`pnpm test` 通过；`pnpm test:full` 通过；server 11 个测试文件 / 43 个测试通过。
+- 完整归档：`tasks/spec/phase-l2-resident-dj-parallel-agents.md`。

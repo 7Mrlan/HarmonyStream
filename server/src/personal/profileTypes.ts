@@ -256,7 +256,7 @@ export interface DjTurnPlan {
 
 export interface MemoryEvidence {
   /* 证据类型。 */
-  type: 'section' | 'track' | 'taste' | 'recent' | 'insight' | 'event' | 'memory';
+  type: 'section' | 'track' | 'taste' | 'recent' | 'insight' | 'event' | 'memory' | 'mood';
   /* 可读标题。 */
   label: string;
   /* 证据分数，只用于排序。 */
@@ -287,6 +287,24 @@ export interface CriticReport {
   safeSay?: string;
 }
 
+export interface ResidentDjAgentTiming {
+  /* agent 名称。 */
+  agent: string;
+  /* 是否成功。 */
+  ok: boolean;
+  /* 耗时毫秒。 */
+  elapsedMs: number;
+  /* 失败或降级原因。 */
+  reason?: string;
+}
+
+export interface ResidentDjDiagnostics {
+  /* 内部 agent timing，只进日志或测试，不进公开 API。 */
+  timings: ResidentDjAgentTiming[];
+  /* 可读降级原因。 */
+  fallbackReasons: string[];
+}
+
 export interface ResidentDjPlan {
   /* 设计智能体输出。 */
   turnPlan: DjTurnPlan;
@@ -298,4 +316,6 @@ export interface ResidentDjPlan {
   critic: CriticReport;
   /* 给 prompt 的压缩行。 */
   promptLines: string[];
+  /* 内部观测信息。 */
+  diagnostics?: ResidentDjDiagnostics;
 }

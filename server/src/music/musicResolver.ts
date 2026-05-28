@@ -29,11 +29,19 @@ export interface ResolveTracksForChatInput {
   allowFallback?: boolean;
 }
 
+export interface SeedResolvedPlan {
+  /* 当前 seed 的搜索词。 */
+  searchText: string;
+  /* 当前 seed 的解析结果。 */
+  plan: ResolvedMusicPlan;
+}
+
 /* provider 解析结果共享缓存。所有 chain 命中都走它。 */
 const resolveCache: MusicCache<Track[]> = createMusicCache<Track[]>({
   maxEntries: env.MUSIC_CACHE_MAX_ENTRIES,
   defaultTtlMs: env.MUSIC_CACHE_DEFAULT_TTL_MS,
 });
+const DEFAULT_SEED_RESOLVE_CONCURRENCY = 2;
 
 /*
  * Phase F：graceful shutdown 时清空 resolve cache。
@@ -142,33 +150,22 @@ async function resolvePreferredSeedBatch({
 }: Required<Pick<ResolveTracksForChatInput, 'userText' | 'limit' | 'allowFallback'>> & {
   preferredSeeds: MusicSearchSeed[];
 }): Promise<ResolvedMusicPlan> {
-  const collected: Track[] = [];
-  const reasons: string[] = [];
-
-  for (const seed of preferredSeeds) {
-    if (collected.length >= limit) break;
-    const searchText = [seed.title, seed.artist].filter(Boolean).join(' ');
-    const plan = await resolveTracksForChat({
-      userText: searchText || seed.title,
-      preferredTitles: [seed.title],
-      limit: 1,
-      allowFallback,
-    });
-    reasons.push(`${searchText || seed.title}: ${plan.reason}`);
-
-    for (const track of plan.tracks) {
-      if (collected.length >= limit) break;
-      if (
-        collected.some(
-          (item) =>
-            getTrackKey(item) === getTrackKey(track) || isSameTitle(item.title, track.title),
-        )
-      ) {
-        continue;
-      }
-      collected.push(cloneTrack(track));
-    }
-  }
+  const seedPlans = await mapWithLimitedConcurrency(
+    preferredSeeds,
+    DEFAULT_SEED_RESOLVE_CONCURRENCY,
+    async (seed) => {
+      const searchText = [seed.title, seed.artist].filter(Boolean).join(' ');
+      const plan = await resolveTracksForChat({
+        userText: searchText || seed.title,
+        preferredTitles: [seed.title],
+        limit: 1,
+        allowFallback,
+      });
+      return { searchText: searchText || seed.title, plan };
+    },
+  );
+  const reasons = seedPlans.map((item) => `${item.searchText}: ${item.plan.reason}`);
+  const collected = selectUniqueSeedBatchTracks(seedPlans, limit);
 
   if (collected.length > 0) {
     return {
@@ -186,6 +183,56 @@ async function resolvePreferredSeedBatch({
     limit,
     allowFallback,
   });
+}
+
+/* 从多个 seed 解析结果里筛出不重复的队列候选。 */
+export function selectUniqueSeedBatchTracks(seedPlans: SeedResolvedPlan[], limit: number): Track[] {
+  const collected: Track[] = [];
+  for (const item of seedPlans) {
+    for (const track of item.plan.tracks) {
+      if (collected.length >= limit) break;
+      if (
+        collected.some(
+          (existing) =>
+            getTrackKey(existing) === getTrackKey(track) || isSameTitle(existing.title, track.title),
+        )
+      ) {
+        continue;
+      }
+      collected.push(cloneTrack(track));
+    }
+    if (collected.length >= limit) break;
+  }
+  return collected;
+}
+
+/*
+ * 有限并发映射。
+ * 用于多 seed 解析：普通网络 I/O 走 async 并发，用户源脚本仍由 LX child_process 隔离。
+ */
+export async function mapWithLimitedConcurrency<TInput, TOutput>(
+  items: TInput[],
+  concurrency: number,
+  worker: (item: TInput, index: number) => Promise<TOutput>,
+): Promise<TOutput[]> {
+  if (items.length === 0) return [];
+
+  const limit = Math.max(1, Math.min(concurrency, items.length));
+  const results = new Array<TOutput>(items.length);
+  let nextIndex = 0;
+
+  async function runWorker(): Promise<void> {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const item = items[index];
+      if (item === undefined) continue;
+      results[index] = await worker(item, index);
+    }
+  }
+
+  await Promise.all(Array.from({ length: limit }, () => runWorker()));
+  return results;
 }
 
 /* 把 preferredTitles / preferredSeeds 合并为带 artist 的内部搜索种子。 */
