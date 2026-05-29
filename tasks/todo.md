@@ -45,7 +45,7 @@
 - [x] Phase L.4：Claudio Personal Memory Loop
 - [x] Phase L.5：Claudio Presence Engine
 - [x] Phase M：用户音源导入 UI
-- [ ] Phase Pet：Claudio 灵动系统伴侣 prototype（GitHub 侧已合入设计草案，代码未实装）
+- [x] Phase Pet：Claudio 灵动系统伴侣 prototype
 - [ ] Phase N：真实音频律动
 - [ ] Phase K：歌曲像素海报（本轮暂缓）
 
@@ -106,6 +106,26 @@
 - 审查：修复 Vitest 无 dist worker 入口导致的测试失败；测试注入同等语义 runner，生产路径不变。
 - 验证：终端命令 `pnpm test` 通过；移动端 3 个测试文件 / 16 个测试，服务端 14 个测试文件 / 68 个测试通过。
 - 验证：终端命令 `pnpm test:full` 通过；server build、结构烟测和 forced-no-result 分支通过。
+
+---
+
+## 当前任务 · Phase Pet Claudio 灵动系统伴侣 Prototype
+
+- [x] 新增 `PetCompanion` 可删除 prototype：可拖拽、可收起、可关闭，默认避让底部输入区。
+- [x] 新增纯状态机 `derivePetCompanionState()`，消费 Life State 与 Presence tone。
+- [x] 主界面接入宠物，传入 `claudioLifeState`、`presenceVisualTone`、听歌、说话和调频状态。
+- [x] 角色本体部件随状态变化：眼睛、嘴、天线、手臂、胸口信号柱，不是贴图漂浮。
+- [x] 补测试：拖拽、说话、调频、听歌、睡眠、陪伴 / 专注语气。
+- [x] 终端命令：运行 `pnpm test`。
+- [x] 阶段验收通过后归档 Phase Pet Spec 并提交代码。
+
+### Phase Pet Review
+
+- 结果：Claudio Signal Keeper 已作为系统伴侣 prototype 接入主界面。
+- 结果：宠物状态来自 L.5 Life / Presence，不另造无来源假状态。
+- 审查：移动端测试避免从 `@claudio/ui` 聚合入口加载 React Native runtime，直接测试纯状态机。
+- 边界：当前 `listen` 仍跟随播放状态，不宣称真实 FFT；真实音频同步进入 Phase N。
+- 验证：终端命令 `pnpm test` 通过；移动端 4 个测试文件 / 22 个测试，服务端 14 个测试文件 / 68 个测试通过。
 
 ---
 

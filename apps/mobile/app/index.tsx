@@ -35,7 +35,7 @@ import {
   NowPlayingBar,
   OnAirIndicator,
   PixelClock,
-  // PetCompanion,
+  PetCompanion,
   PlaybackProgressBar,
   PlayerControls,
   TopBar,
@@ -779,13 +779,15 @@ export default function HomeScreen() {
       </View>
 
       {/* Phase Pet prototype：贴边系统伴侣，默认避开底部输入区，可拖拽和收起。 */}
-      {/* <PetCompanion
+      <PetCompanion
+        lifeState={claudioLifeState}
+        presenceTone={presenceVisualTone}
         listening={animationActive}
         speaking={tts.playing}
         thinking={djLoading}
         topInset={insets.top}
-        bottomInset={insets.bottom}
-      /> */}
+        bottomOffset={insets.bottom + androidKbHeight + 92}
+      />
     </View>
   );
 }
