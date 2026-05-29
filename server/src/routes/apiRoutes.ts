@@ -10,6 +10,10 @@ import type {
   ChatResponse,
   ListeningEventRequest,
   ListeningEventResponse,
+  MusicSourceActivationResponse,
+  MusicSourceImportRequest,
+  MusicSourceImportResponse,
+  MusicSourceStatusResponse,
   ModelsResponse,
   NextResponse,
   NowResponse,
@@ -32,6 +36,13 @@ import {
 } from '../state/radioState.js';
 import { broadcastStreamEvent } from '../realtime/streamHub.js';
 import { appendListeningEvent } from '../personal/profileStore.js';
+import {
+  activateUserMusicSource,
+  getMusicSourceStatus,
+  importUserMusicSource,
+  type SourceValidationRunner,
+} from '../music/userSourceStore.js';
+import { resetProviderChainCache } from '../music/providerRegistry.js';
 
 const ChatRequestSchema = z.object({
   text: z.string().trim().min(1, 'text 不能为空'),
@@ -67,11 +78,22 @@ const ListeningEventRequestSchema = z
       });
     }
   });
+const MusicSourceImportRequestSchema = z.object({
+  name: z.string().trim().min(1, 'name 不能为空').max(80, 'name 过长'),
+  script: z.string().trim().min(1, 'script 不能为空').max(600_000, 'script 过长'),
+});
+const MusicSourceActivationRequestSchema = z.object({
+  mode: z.enum(['default', 'user']),
+});
 const CLAUDIO_CLIENT_HEADER = 'claudio-app';
 
 export interface RegisterApiRoutesOptions {
   /* 测试或特殊运行时可指定用户资料目录；生产默认使用 server/data/user-profile。 */
   profileDir?: string;
+  /* 测试或特殊运行时可指定用户音源目录；生产默认使用 server/data/lx-sources/user。 */
+  sourceDir?: string;
+  /* 测试可注入音源验证 runner；生产默认使用 LX child_process worker。 */
+  sourceValidationRunner?: SourceValidationRunner;
   /* 测试可覆盖共享写入 token；undefined 使用 env.SHARED_TOKEN，null 表示显式关闭 token 校验。 */
   memoryWriteToken?: string | null;
 }
@@ -126,7 +148,7 @@ export function registerApiRoutes(app: FastifyInstance, options: RegisterApiRout
   app.post('/api/listening-events', async (request, reply): Promise<ListeningEventResponse> => {
     const memoryWriteToken =
       options.memoryWriteToken === undefined ? env.SHARED_TOKEN : options.memoryWriteToken;
-    if (!isListeningEventWriteAllowed(request.headers, memoryWriteToken)) {
+    if (!isLocalWriteAllowed(request.headers, memoryWriteToken)) {
       reply.status(403);
       return {
         ok: false,
@@ -159,6 +181,82 @@ export function registerApiRoutes(app: FastifyInstance, options: RegisterApiRout
         reason: '听歌事件写入失败。',
       };
     }
+  });
+
+  app.get('/api/music-sources', async (): Promise<MusicSourceStatusResponse> => {
+    return getMusicSourceStatus(options.sourceDir);
+  });
+
+  app.post('/api/music-sources/import', async (request, reply): Promise<MusicSourceImportResponse> => {
+    const memoryWriteToken =
+      options.memoryWriteToken === undefined ? env.SHARED_TOKEN : options.memoryWriteToken;
+    if (!isLocalWriteAllowed(request.headers, memoryWriteToken)) {
+      reply.status(403);
+      return {
+        ok: false,
+        status: await getMusicSourceStatus(options.sourceDir),
+        validation: {
+          ok: false,
+          sourceKeys: [],
+          reason: '音源导入来源未通过校验。',
+        },
+      };
+    }
+
+    const parsed = MusicSourceImportRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return {
+        ok: false,
+        status: await getMusicSourceStatus(options.sourceDir),
+        validation: {
+          ok: false,
+          sourceKeys: [],
+          reason: '音源导入请求体校验失败。',
+        },
+      };
+    }
+
+    const sourceRequest: MusicSourceImportRequest = parsed.data;
+    const result = await importUserMusicSource({
+      ...sourceRequest,
+      ...(options.sourceDir ? { sourceDir: options.sourceDir } : {}),
+      ...(options.sourceValidationRunner ? { validationRunner: options.sourceValidationRunner } : {}),
+    });
+    if (!result.ok) reply.status(400);
+    if (result.ok) resetProviderChainCache();
+    return result;
+  });
+
+  app.post('/api/music-sources/activate', async (request, reply): Promise<MusicSourceActivationResponse> => {
+    const memoryWriteToken =
+      options.memoryWriteToken === undefined ? env.SHARED_TOKEN : options.memoryWriteToken;
+    if (!isLocalWriteAllowed(request.headers, memoryWriteToken)) {
+      reply.status(403);
+      return {
+        ok: false,
+        status: await getMusicSourceStatus(options.sourceDir),
+        reason: '音源启用来源未通过校验。',
+      };
+    }
+
+    const parsed = MusicSourceActivationRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return {
+        ok: false,
+        status: await getMusicSourceStatus(options.sourceDir),
+        reason: '音源启用请求体校验失败。',
+      };
+    }
+
+    const result = await activateUserMusicSource({
+      mode: parsed.data.mode,
+      ...(options.sourceDir ? { sourceDir: options.sourceDir } : {}),
+    });
+    if (!result.ok) reply.status(400);
+    if (result.ok) resetProviderChainCache();
+    return result;
   });
 
   app.post('/api/chat', async (request, reply): Promise<ChatResponse> => {
@@ -197,7 +295,7 @@ export function registerApiRoutes(app: FastifyInstance, options: RegisterApiRout
  * 校验本地记忆写入来源。
  * 配置 SHARED_TOKEN 时必须带 Bearer token；未配置时至少要求 Claudio client 标记，并拒绝明显的外站浏览器 Origin。
  */
-function isListeningEventWriteAllowed(
+function isLocalWriteAllowed(
   headers: Record<string, string | string[] | undefined>,
   memoryWriteToken: string | null | undefined,
 ): boolean {

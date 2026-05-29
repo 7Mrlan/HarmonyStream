@@ -3,6 +3,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { handleLoadSource } from '../music/lxBridge/worker-entry.js';
+import type { LxSourceScript } from '../music/lxBridge/types.js';
 import { loadUserMusicProfile } from '../personal/profileStore.js';
 import { registerApiRoutes, type RegisterApiRoutesOptions } from './apiRoutes.js';
 
@@ -14,11 +16,34 @@ let tempDirs: string[] = [];
  */
 async function createTestApp(options: Omit<RegisterApiRoutesOptions, 'profileDir'> = {}) {
   const profileDir = await mkdtemp(join(tmpdir(), 'claudio-events-'));
+  const sourceDir = await mkdtemp(join(tmpdir(), 'claudio-sources-'));
   tempDirs.push(profileDir);
+  tempDirs.push(sourceDir);
   const app = Fastify({ logger: false });
-  registerApiRoutes(app, { profileDir, memoryWriteToken: null, ...options });
+  registerApiRoutes(app, {
+    profileDir,
+    sourceDir,
+    memoryWriteToken: null,
+    sourceValidationRunner: validateInProcess,
+    ...options,
+  });
   await app.ready();
-  return { app, profileDir };
+  return { app, profileDir, sourceDir };
+}
+
+/* 最小 LX-compatible 用户源脚本，路由测试只验证导入和启用状态。 */
+function validSourceScript(): string {
+  return `
+    lx.on(lx.EVENT_NAMES.request, async () => null);
+    lx.send(lx.EVENT_NAMES.inited, {
+      sources: { demo: { type: 'music', actions: ['musicUrl'], qualitys: ['128k'] } }
+    });
+  `;
+}
+
+/* 路由测试复用 worker-entry 的验证逻辑，但不启动子进程。 */
+function validateInProcess(script: LxSourceScript) {
+  return handleLoadSource({ script, requestTimeoutMs: 1000 });
 }
 
 afterEach(async () => {
@@ -179,6 +204,77 @@ describe('POST /api/listening-events', () => {
       expect(withToken.statusCode).toBe(200);
       expect(profile.listeningEvents).toHaveLength(1);
       expect(profile.listeningEvents[0]?.title).toBe('Riverside');
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('POST /api/music-sources/import', () => {
+  it('验证并导入用户源后可回滚默认源', async () => {
+    const { app } = await createTestApp();
+
+    try {
+      const imported = await app.inject({
+        method: 'POST',
+        url: '/api/music-sources/import',
+        headers: {
+          'x-claudio-client': 'claudio-app',
+        },
+        payload: {
+          name: 'Demo Source',
+          script: validSourceScript(),
+        },
+      });
+      const rollback = await app.inject({
+        method: 'POST',
+        url: '/api/music-sources/activate',
+        headers: {
+          'x-claudio-client': 'claudio-app',
+        },
+        payload: {
+          mode: 'default',
+        },
+      });
+
+      expect(imported.statusCode).toBe(200);
+      expect(imported.json<{ ok: boolean; status: { activeMode: string } }>().ok).toBe(true);
+      expect(imported.json<{ status: { activeMode: string } }>().status.activeMode).toBe('user');
+      expect(rollback.statusCode).toBe(200);
+      expect(rollback.json<{ status: { activeMode: string } }>().status.activeMode).toBe('default');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('拒绝缺来源标记或非法脚本的导入请求', async () => {
+    const { app } = await createTestApp();
+
+    try {
+      const missingClient = await app.inject({
+        method: 'POST',
+        url: '/api/music-sources/import',
+        payload: {
+          name: 'Demo Source',
+          script: validSourceScript(),
+        },
+      });
+      const invalidScript = await app.inject({
+        method: 'POST',
+        url: '/api/music-sources/import',
+        headers: {
+          'x-claudio-client': 'claudio-app',
+        },
+        payload: {
+          name: 'Bad Source',
+          script: `throw new Error('bad source');`,
+        },
+      });
+
+      expect(missingClient.statusCode).toBe(403);
+      expect(missingClient.json<{ ok: boolean }>().ok).toBe(false);
+      expect(invalidScript.statusCode).toBe(400);
+      expect(invalidScript.json<{ ok: boolean }>().ok).toBe(false);
     } finally {
       await app.close();
     }

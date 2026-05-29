@@ -44,6 +44,7 @@ import {
   type MusicSpectrumMode,
 } from '@claudio/ui';
 import { getApiBaseUrl, getApiSharedToken } from './_config/api';
+import { MusicSourcePanel } from './_components/MusicSourcePanel';
 import { useNowPlayingMedia } from './_hooks/useNowPlayingMedia';
 import { useRadioPlayer, type RadioTrack } from './_hooks/useRadioPlayer';
 import { useStationController } from './_hooks/useStationController';
@@ -666,6 +667,7 @@ export default function HomeScreen() {
         >
           {/* 顶部状态栏（带 AI 模型徽章，集中展示当前模型） */}
           <TopBar modelName={currentModelName} />
+          <MusicSourcePanel apiClient={apiClient} />
 
           {/* 封面 / 时钟 + ON AIR：有歌曲封面时优先展示封面，失败时回退时钟。 */}
           <View className="items-center pt-4 pb-6 px-4">

@@ -10,6 +10,10 @@ import type {
   ChatResponse,
   ListeningEventRequest,
   ListeningEventResponse,
+  MusicSourceActivationResponse,
+  MusicSourceImportRequest,
+  MusicSourceImportResponse,
+  MusicSourceStatusResponse,
   ModelsResponse,
   NextResponse,
   NowResponse,
@@ -62,6 +66,12 @@ export interface ClaudioApiClient {
   sendChat: (request: ChatRequest) => Promise<ChatResponse>;
   /* 记录本地听歌行为 */
   recordListeningEvent: (request: ListeningEventRequest) => Promise<ListeningEventResponse>;
+  /* 获取用户音源导入状态 */
+  getMusicSources: () => Promise<MusicSourceStatusResponse>;
+  /* 验证并导入 LX-compatible 用户源 */
+  importMusicSource: (request: MusicSourceImportRequest) => Promise<MusicSourceImportResponse>;
+  /* 启用用户源或回滚默认源 */
+  activateMusicSource: (mode: 'default' | 'user') => Promise<MusicSourceActivationResponse>;
   /* 获取模型列表 */
   getModels: () => Promise<ModelsResponse>;
   /* 切换模型 */
@@ -142,6 +152,19 @@ export function createApiClient(options: ApiClientOptions = {}): ClaudioApiClien
         method: 'POST',
         headers: jsonHeaders,
         body: JSON.stringify(request),
+      }),
+    getMusicSources: () => requestJson<MusicSourceStatusResponse>(fetcher, baseUrl, '/api/music-sources'),
+    importMusicSource: (request) =>
+      requestJson<MusicSourceImportResponse>(fetcher, baseUrl, '/api/music-sources/import', {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify(request),
+      }),
+    activateMusicSource: (mode) =>
+      requestJson<MusicSourceActivationResponse>(fetcher, baseUrl, '/api/music-sources/activate', {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify({ mode }),
       }),
     getModels: () => requestJson<ModelsResponse>(fetcher, baseUrl, '/api/models'),
     switchModel: (id) =>

@@ -112,7 +112,14 @@ export function requestWorker<TResponse>(
     child.once('exit', onExit);
     child.once('error', onExit);
 
-    const sent = child.send(message);
+    let sent = false;
+    try {
+      sent = Boolean(child.send(message));
+    } catch {
+      cleanup();
+      rejectPromise(new Error(`LX worker 消息发送失败：${message.action}`));
+      return;
+    }
     if (!sent) {
       cleanup();
       rejectPromise(new Error(`LX worker 消息发送失败：${message.action}`));

@@ -8,9 +8,9 @@
 
 ## 当前活跃索引
 
-- 当前主线：AI 电台已完成 Phase L.5 Claudio Presence Engine；下一阶段待确认。
+- 当前主线：AI 电台已完成 Phase M 用户音源导入 UI；下一阶段执行 Phase Pet。
 - 已完成：Phase A 后端 API 骨架；Phase B 移动端接入；Phase C LLM 主播；Phase C+ 等待体验；Phase D 音乐来源；Phase D.5 性能地基；Phase E TTS 入声；Phase F.0 SDK 56 依赖升级；Phase F.A 音频会话/后台权限；Phase F.B WS 心跳/重连；Phase F.C 锁屏 metadata 代码接线；Phase F.D APK 构建入口；Phase F.E 服务端 graceful shutdown；Phase J 队列与推荐体验收口；Phase J.1 radioState 编排拆分；Phase J.2 chatTurnPlanner 抽离；Phase J.3 自动化测试入口；Phase L.0 个人音乐记忆与 Context Engine。
-- 当前阶段：Phase L.5 已完成并归档；当前没有新的实现阶段获得确认。
+- 当前阶段：Phase M 已完成并归档；Phase K 歌曲像素海报暂时移出本轮路线。
 - 当前 HARD-GATE：下一阶段如果进入宠物、真实 FFT、公开 API 扩展或长期自动记忆汇总，仍需重新写当前现状与文件级计划。
 - 当前边界：BYO-LLM 用户自配 key/baseUrl/model 单独作为 Phase F.5，不混入 Phase F 锁屏 / APK 验收。
 
@@ -174,6 +174,7 @@
 | Phase L.3   | 完成 | 移动端本地 Life State Bus、频谱 mode、OnAir/NowPlaying/DJBubble 映射和移动端 Vitest 已落地；完整历史见 `tasks/spec/phase-l3-claudio-life-state-bus.md`。        |
 | Phase L.4   | 完成 | 本地个人记忆写入闭环已落地：listening event API、移动端收藏/切歌/反馈上报、来源防护和保守 feedback 识别；完整历史见 `tasks/spec/phase-l4-personal-memory-loop.md`。 |
 | Phase L.5   | 完成 | 会话 Presence Engine 已落地：服务端连续状态、Resident DJ 轻量曲线偏置、切歌反馈和移动端 visual tone；完整历史见 `tasks/spec/phase-l5-claudio-presence-engine.md`。 |
+| Phase M     | 完成 | 用户音源导入 UI 已落地：App SOURCE 面板、服务端验证 / 启用 / 回滚 API、LX worker 验证和 provider cache reset；完整历史见 `tasks/spec/phase-m-user-music-source-import-ui.md`。 |
 
 ---
 
@@ -238,11 +239,13 @@
    - 导入歌单只作为口味种子和个人记忆来源，提取偏好并推荐相似但不固定的歌曲；不能把导入歌单变成固定播放列表。
    - 完成条件：`/api/chat` 的推荐先经过个人资料检索；DJ 文案能引用真实资料或明确只讲听感；测试覆盖“开心 / 深夜 / 怀旧 / 明确点歌”四类路径。
 2. Phase M：用户音源导入 UI。
-   - 默认双源池已可开箱即用；后续设置页提供用户源导入、验证、回滚和沙箱状态展示。
-3. Phase K：歌曲像素海报。
-   - 当前已有 `Track.artwork -> TrackArtworkPanel -> PixelClock fallback` 链路；个人电台核心闭环稳定后，再补真正轻量像素海报生成 / 缓存策略。
+   - 已完成：App SOURCE 面板可导入、验证、启用和回滚 LX-compatible 用户源；服务端复用 LX child_process worker，状态文件写入 ignored 的 `server/data/lx-sources/user`。
+3. Phase Pet：Claudio 灵动系统伴侣 prototype。
+   - 宠物必须消费 Life / Presence 状态并具备角色本体动作；不得用贴图漂浮、模型徽章或假动画伪装生命感。
 4. Phase N：真实音频律动。
    - 当前频谱是视觉模拟；真实 FFT / PCM 律动需要单独评估 Web 与 Native 能力，不混入队列体验阶段。
+5. Phase K：歌曲像素海报。
+   - 暂时移出本轮执行；当前已有 `Track.artwork -> TrackArtworkPanel -> PixelClock fallback` 链路，后续再补真正轻量像素海报生成 / 缓存策略。
 
 ### 14.2 插队规则
 

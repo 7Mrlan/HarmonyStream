@@ -78,6 +78,53 @@ export interface ListeningEventResponse {
   reason?: string;
 }
 
+/* ========== GET/POST /api/music-sources ========== */
+
+export type MusicSourceMode = 'default' | 'user' | 'env';
+
+export interface MusicSourceStatusResponse {
+  activeMode: MusicSourceMode;
+  defaultAvailable: boolean;
+  hasUserSource: boolean;
+  userSource?: {
+    active: boolean;
+    name: string;
+    scriptHash: string;
+    importedAt: string;
+    sourceKeys: string[];
+    lastValidationOk: boolean;
+  };
+  message?: string;
+}
+
+export interface MusicSourceImportRequest {
+  name: string;
+  script: string;
+}
+
+export interface MusicSourceValidationResult {
+  ok: boolean;
+  scriptHash?: string;
+  sourceKeys: string[];
+  reason?: string;
+}
+
+export interface MusicSourceImportResponse {
+  ok: boolean;
+  status: MusicSourceStatusResponse;
+  validation: MusicSourceValidationResult;
+}
+
+export interface MusicSourceActivationRequest {
+  mode: Exclude<MusicSourceMode, 'env'>;
+}
+
+export interface MusicSourceActivationResponse {
+  ok: boolean;
+  status: MusicSourceStatusResponse;
+  reason?: string;
+}
+
 /* ========== GET /api/now ========== */
 
 export interface NowResponse {

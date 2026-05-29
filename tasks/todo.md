@@ -44,10 +44,10 @@
 - [x] Phase L.3：Claudio Life State Bus
 - [x] Phase L.4：Claudio Personal Memory Loop
 - [x] Phase L.5：Claudio Presence Engine
-- [ ] Phase M：用户音源导入 UI
+- [x] Phase M：用户音源导入 UI
 - [ ] Phase Pet：Claudio 灵动系统伴侣 prototype（GitHub 侧已合入设计草案，代码未实装）
-- [ ] Phase K：歌曲像素海报
 - [ ] Phase N：真实音频律动
+- [ ] Phase K：歌曲像素海报（本轮暂缓）
 
 ---
 
@@ -84,6 +84,28 @@
 - 终端窗口操作：仍不生效时，在运行 Expo 的终端窗口按 `Ctrl + C` 停掉 Metro。
 - 终端命令：`pnpm --filter @claudio/mobile dev -- --clear`
 - 浏览器操作：重新打开 Expo Web 页面并再次硬刷新。
+
+---
+
+## 当前任务 · Phase M 用户音源导入 UI
+
+- [x] 新增服务端用户源 store：验证、导入、启用、回滚，写入 ignored 的 `server/data/lx-sources/user`。
+- [x] 将 App 导入源接入 provider chain，保留环境变量源优先级，启用 / 回滚后 reset provider cache。
+- [x] 扩展 `packages/api` 类型和 client 方法。
+- [x] 新增移动端 SOURCE 面板：状态查看、脚本导入、启用用户源、回滚默认源。
+- [x] 补测试：合法源验证、导入启用、默认回滚、非法源拒绝、路由来源校验。
+- [x] 终端命令：运行 `pnpm test`。
+- [x] 终端命令：运行 `pnpm test:full`。
+- [x] 阶段验收通过后归档 Phase M Spec 并提交代码。
+
+### Phase M Review
+
+- 结果：用户可在 App SOURCE 面板粘贴 LX-compatible 源脚本，服务端先验证再启用。
+- 安全：脚本文本不进入公开状态响应；生产验证仍走 LX child_process worker，不在 Fastify 主进程执行用户脚本。
+- 回滚：回滚默认源只禁用本地用户源，不删除脚本，默认双源池仍可用。
+- 审查：修复 Vitest 无 dist worker 入口导致的测试失败；测试注入同等语义 runner，生产路径不变。
+- 验证：终端命令 `pnpm test` 通过；移动端 3 个测试文件 / 16 个测试，服务端 14 个测试文件 / 68 个测试通过。
+- 验证：终端命令 `pnpm test:full` 通过；server build、结构烟测和 forced-no-result 分支通过。
 
 ---
 
