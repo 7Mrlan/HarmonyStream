@@ -36,6 +36,11 @@ import {
   parseMusicRequestKind,
 } from './intentParser.js';
 import { buildQueue, chooseTrackFromPlay } from './playbackQueue.js';
+import {
+  createPresenceState,
+  updatePresenceFromTurn,
+  type DjSessionPresence,
+} from './presenceEngine.js';
 import { buildSessionIntent, getTargetQueueSize, type RadioSessionIntent } from './radioSession.js';
 
 type SuccessfulMusicIntent = Extract<GenerateMusicIntentResult, { ok: true }>;
@@ -47,6 +52,7 @@ export interface ChatTurnPlanningContext {
   recentTracks?: Track[];
   now?: Date;
   profileDir?: string;
+  presence?: DjSessionPresence;
 }
 
 export type ChatTurnPlan =
@@ -58,6 +64,7 @@ export type ChatTurnPlan =
       activeIntent: RadioSessionIntent;
       shouldScheduleTts: boolean;
       personalContext: PersonalContext;
+      presence: DjSessionPresence;
     }
   | {
       ok: false;
@@ -99,7 +106,14 @@ export async function planChatTurn(
         userText: text,
         personalContext,
         requestKind,
+        presence: context.presence,
       });
+  const plannedPresence = residentDjPlan
+    ? updatePresenceFromTurn({
+        current: context.presence ?? createPresenceState(),
+        turnPlan: residentDjPlan.turnPlan,
+      })
+    : (context.presence ?? createPresenceState());
   const promptPersonalContext = residentDjPlan
     ? attachResidentDjPlanToPersonalContext(personalContext, residentDjPlan)
     : personalContext;
@@ -219,6 +233,7 @@ export async function planChatTurn(
     }),
     shouldScheduleTts: Boolean(request.voice),
     personalContext: promptPersonalContext,
+    presence: plannedPresence,
   };
 }
 

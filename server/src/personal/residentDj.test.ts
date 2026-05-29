@@ -162,6 +162,94 @@ describe('Resident DJ plan', () => {
     expect(plan.turnPlan.constraints.join('\n')).toContain('可以一起开心');
   });
 
+  it('上一轮 soft-hold presence 会让中性输入延续陪伴曲线但不固定歌曲', () => {
+    const plan = buildResidentDjPlan({
+      userText: '嗯，随便再来点',
+      requestKind: 'range',
+      presence: {
+        arc: 'soft-hold',
+        energyBias: -1,
+        talkativeness: 'warm',
+        recentSignals: ['用户需要先被接住，不突然推亮'],
+        turnsInArc: 1,
+      },
+      personalContext: context(
+        [
+          section(
+            '夜尾',
+            ['深夜', '低刺激'],
+            [
+              { name: 'Riverside', artist: 'Agnes Obel' },
+              { name: 'Should Have Known Better', artist: 'Sufjan Stevens' },
+            ],
+          ),
+        ],
+        new Date('2026-05-28T23:00:00+08:00'),
+      ),
+    });
+
+    expect(plan.turnPlan.comfortMode).toBe('lift-gently');
+    expect(plan.turnPlan.constraints.join('\n')).toContain('延续上一轮陪伴');
+    expect(plan.promptLines.join('\n')).toContain('Resident DJ Presence');
+    expect(new Set(plan.curatedCandidates.map((candidate) => candidate.title)).size).toBeGreaterThan(
+      1,
+    );
+  });
+
+  it('focus-flow presence 会让中性输入保持低刺激和少说话', () => {
+    const plan = buildResidentDjPlan({
+      userText: '继续',
+      requestKind: 'range',
+      presence: {
+        arc: 'focus-flow',
+        energyBias: -1,
+        talkativeness: 'brief',
+        recentSignals: ['用户需要低刺激专注陪伴'],
+        turnsInArc: 1,
+      },
+      personalContext: context(
+        [
+          section('上午轻音乐', ['清晨', '低刺激', '专注'], [
+            { name: 'Open Eye Signal', artist: 'Jon Hopkins' },
+            { name: 'Thrown', artist: 'Kiasmos' },
+          ]),
+        ],
+        new Date('2026-05-28T10:00:00+08:00'),
+      ),
+    });
+
+    expect(plan.turnPlan.comfortMode).toBe('focus-with-you');
+    expect(plan.turnPlan.energyCurve).toBe('deep-focus');
+    expect(plan.turnPlan.constraints.join('\n')).toContain('低刺激');
+  });
+
+  it('明确开心输入不会把上一轮 soft-hold presence 写进 prompt', () => {
+    const plan = buildResidentDjPlan({
+      userText: '今天好爽，想听点开心的',
+      requestKind: 'range',
+      presence: {
+        arc: 'soft-hold',
+        energyBias: -1,
+        talkativeness: 'warm',
+        recentSignals: ['用户需要先被接住，不突然推亮'],
+        turnsInArc: 1,
+      },
+      personalContext: context(
+        [
+          section('运动 · 心率', ['运动', '开心'], [
+            { name: 'A Moment Apart', artist: 'ODESZA' },
+            { name: 'You & Me', artist: 'Disclosure' },
+          ]),
+        ],
+        new Date('2026-05-28T18:00:00+08:00'),
+      ),
+    });
+
+    expect(plan.turnPlan.comfortMode).toBe('celebrate');
+    expect(plan.turnPlan.energyCurve).toBe('bright');
+    expect(plan.promptLines.join('\n')).not.toContain('Resident DJ Presence');
+  });
+
   it('跳过事件会降低同名歌曲信任分，避免继续硬推', () => {
     const plan = buildResidentDjPlan({
       userText: '上午随便来点',

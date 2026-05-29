@@ -8,6 +8,11 @@
 import type { ChatResponse, Track } from '@claudio/api';
 import type { MusicSearchSeed } from '../music/types.js';
 import type { MusicRequestKind } from '../radio/intentParser.js';
+import {
+  applyPresenceToTurnPlan,
+  buildPresencePromptLine,
+  type DjSessionPresence,
+} from '../radio/presenceEngine.js';
 import type {
   ComfortMode,
   CriticReport,
@@ -33,6 +38,8 @@ export interface BuildResidentDjPlanInput {
   personalContext: PersonalContext;
   /* 本地意图解析出的请求粒度。 */
   requestKind: MusicRequestKind;
+  /* 会话级 presence，只作为轻量证据，不直接选歌。 */
+  presence?: DjSessionPresence;
 }
 
 export interface BuildResidentDjPlanAsyncInput extends BuildResidentDjPlanInput {
@@ -115,7 +122,13 @@ export function buildResidentDjPlan(input: BuildResidentDjPlanInput): ResidentDj
     evidence,
     curatedCandidates,
     critic,
-    promptLines: buildResidentPromptLines(turnPlan, evidence, curatedCandidates, critic),
+    promptLines: buildResidentPromptLines(
+      turnPlan,
+      evidence,
+      curatedCandidates,
+      critic,
+      turnPlan.presenceApplied ? input.presence : undefined,
+    ),
   };
 }
 
@@ -195,7 +208,13 @@ export async function buildResidentDjPlanAsync(
     evidence,
     curatedCandidates,
     critic,
-    promptLines: buildResidentPromptLines(turnPlan, evidence, curatedCandidates, critic),
+    promptLines: buildResidentPromptLines(
+      turnPlan,
+      evidence,
+      curatedCandidates,
+      critic,
+      turnPlan.presenceApplied ? input.presence : undefined,
+    ),
     diagnostics: {
       timings,
       fallbackReasons,
@@ -291,8 +310,7 @@ function buildTurnPlan(input: BuildResidentDjPlanInput, moodSignal: MoodSignal):
   const intent = detectResidentIntent(userText, moodSignal);
   const targetCount = chooseTargetCount(userText, input.requestKind, intent);
   const playlistShape = choosePlaylistShape(targetCount);
-
-  return {
+  const basePlan = {
     userText,
     intent,
     comfortMode: moodSignal.comfortMode,
@@ -301,6 +319,8 @@ function buildTurnPlan(input: BuildResidentDjPlanInput, moodSignal: MoodSignal):
     energyCurve: moodSignal.energyCurve,
     constraints: dedupeStrings(moodSignal.constraints),
   };
+
+  return applyPresenceToTurnPlan(basePlan, input.presence);
 }
 
 /*
@@ -791,6 +811,7 @@ function buildResidentPromptLines(
   evidence: MemoryEvidence[],
   candidates: CuratedCandidate[],
   critic: CriticReport,
+  presence?: DjSessionPresence,
 ): string[] {
   const candidateLine =
     candidates.length > 0
@@ -803,6 +824,7 @@ function buildResidentPromptLines(
 
   return [
     `Resident DJ 计划：intent=${turnPlan.intent}，comfort=${turnPlan.comfortMode}，shape=${turnPlan.playlistShape}，target=${turnPlan.targetCount}，curve=${turnPlan.energyCurve}`,
+    buildPresencePromptLine(presence),
     `Resident DJ 约束：${turnPlan.constraints.join('；') || '无额外约束'}`,
     `Resident DJ 证据：${evidence
       .slice(0, 4)
@@ -810,7 +832,7 @@ function buildResidentPromptLines(
       .join('；') || '暂无个人证据'}`,
     `Resident DJ 策展候选：${candidateLine}`,
     `Resident DJ 审查：${critic.ok ? '通过' : critic.issues.join('；')}`,
-  ];
+  ].filter((line): line is string => Boolean(line));
 }
 
 /* 构造安全降级话术。 */

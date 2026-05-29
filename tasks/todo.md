@@ -14,7 +14,7 @@
 - 涉及 `packages/*` 后，如果页面没变，先按 Metro / 浏览器缓存陷阱排查。
 - 所有“运行 / 重启 / 打开 / 点击”步骤必须标明执行载体。
 - Claudio 永远是音乐电台：评论区 / 对话输入是点歌和推荐入口，不新增独立搜索框；LLM 主播负责理解意图、策划选曲、讲短背景和过渡。
-- Claudio 的核心不是通用点歌和短文案，而是个人音乐记忆驱动的 AI 电台；Phase L.3 Life State Bus 已完成。
+- Claudio 的核心不是通用点歌和短文案，而是个人音乐记忆驱动的 AI 电台；Phase L.5 Presence Engine 已完成。
 - GitHub 侧 Phase Pet 当前是设计草案和注释占位，`PetCompanion` 组件尚未实际存在；不能当作已完成 prototype。
 - 默认音乐源使用已验证的 LX-compatible 链路：huibq 源 raw URL + Kuwo 候选搜索；用户仍可通过 env 配置覆盖源脚本或候选 resolver。
 
@@ -43,6 +43,7 @@
 - [x] Phase L.2：测试整理 + Resident DJ 并行多智能体升级
 - [x] Phase L.3：Claudio Life State Bus
 - [x] Phase L.4：Claudio Personal Memory Loop
+- [x] Phase L.5：Claudio Presence Engine
 - [ ] Phase M：用户音源导入 UI
 - [ ] Phase Pet：Claudio 灵动系统伴侣 prototype（GitHub 侧已合入设计草案，代码未实装）
 - [ ] Phase K：歌曲像素海报
@@ -83,6 +84,30 @@
 - 终端窗口操作：仍不生效时，在运行 Expo 的终端窗口按 `Ctrl + C` 停掉 Metro。
 - 终端命令：`pnpm --filter @claudio/mobile dev -- --clear`
 - 浏览器操作：重新打开 Expo Web 页面并再次硬刷新。
+
+---
+
+## 当前任务 · Phase L.5 Claudio Presence Engine
+
+- [x] 将 Phase L.5 写入 `tasks/spec.md`：服务端会话 presence、Resident DJ 连续曲线、移动端展示语气和非目标边界。
+- [x] 新增服务端 `presenceEngine` 纯函数：会话 arc、能量偏置、说话尺度、播放移动反馈。
+- [x] 将 presence 接入 `radioState.ts` 与 `chatTurnPlanner.ts`，不修改公开 API / WS 契约。
+- [x] 将 presence 作为 Resident DJ evidence，影响曲线和约束但不覆盖明确点歌。
+- [x] 新增移动端 `presenceVisualTone` 纯函数并接入 `MusicSpectrum.mode` 映射。
+- [x] 补测试：连续伤心陪伴、开心共振、专注保持、下一首 / 上一首轻量降能量、移动端 tone。
+- [x] 终端命令：运行 `pnpm test`。
+- [x] 终端命令：运行 `pnpm test:full`。
+- [x] 自审：检查固定映射、假装懂用户、隐私写入、公开契约变化和不可播放文案。
+- [x] 阶段验收通过后归档 Phase L.5 Spec 并提交代码。
+
+### Phase L.5 Review
+
+- 结果：服务端新增进程内 Presence Engine，聊天轮次会把上一轮会话氛围作为轻量 evidence 交给 Resident DJ。
+- 结果：presence 只改中性输入；明确开心、伤心、专注请求优先，避免“上一轮状态”压过用户当前意图。
+- 结果：移动端新增本地 visual tone，驱动 OnAir / NowPlaying / MusicSpectrum 展示，不新增公开 API。
+- 审查：已修复 soft-hold 可能永久粘住、明确开心输入被上一轮陪伴态压暗、fresh 状态切歌反馈未被消费、明确输入仍携带旧 presence prompt 的问题。
+- 验证：终端命令 `pnpm test` 通过；移动端 3 个测试文件 / 16 个测试，服务端 13 个测试文件 / 62 个测试通过。
+- 验证：终端命令 `pnpm test:full` 通过；server build、结构烟测和 forced-no-result 分支通过。
 
 ---
 

@@ -252,6 +252,8 @@ export interface DjTurnPlan {
   energyCurve: EnergyCurve;
   /* 本轮约束，例如不要太吵、不要说教。 */
   constraints: string[];
+  /* 本轮计划是否由会话 presence 延续而来，用于后续状态衰减。 */
+  presenceApplied?: boolean;
 }
 
 export interface MemoryEvidence {

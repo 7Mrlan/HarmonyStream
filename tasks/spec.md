@@ -8,13 +8,11 @@
 
 ## 当前活跃索引
 
-- 当前主线：AI 电台已完成 Phase L.4 Claudio Personal Memory Loop；下一阶段待确认。
+- 当前主线：AI 电台已完成 Phase L.5 Claudio Presence Engine；下一阶段待确认。
 - 已完成：Phase A 后端 API 骨架；Phase B 移动端接入；Phase C LLM 主播；Phase C+ 等待体验；Phase D 音乐来源；Phase D.5 性能地基；Phase E TTS 入声；Phase F.0 SDK 56 依赖升级；Phase F.A 音频会话/后台权限；Phase F.B WS 心跳/重连；Phase F.C 锁屏 metadata 代码接线；Phase F.D APK 构建入口；Phase F.E 服务端 graceful shutdown；Phase J 队列与推荐体验收口；Phase J.1 radioState 编排拆分；Phase J.2 chatTurnPlanner 抽离；Phase J.3 自动化测试入口；Phase L.0 个人音乐记忆与 Context Engine。
-- 当前阶段：Phase L.4 已完成并归档；当前没有新的实现阶段获得确认。
-- 当前 HARD-GATE：下一阶段如果进入移动端导入 UI、长期记忆自动汇总、宠物实现或真实 FFT，仍需重新写当前现状与文件级计划。
+- 当前阶段：Phase L.5 已完成并归档；当前没有新的实现阶段获得确认。
+- 当前 HARD-GATE：下一阶段如果进入宠物、真实 FFT、公开 API 扩展或长期自动记忆汇总，仍需重新写当前现状与文件级计划。
 - 当前边界：BYO-LLM 用户自配 key/baseUrl/model 单独作为 Phase F.5，不混入 Phase F 锁屏 / APK 验收。
-
----
 
 ## 0. 产品一句话
 
@@ -175,6 +173,7 @@
 | Phase L.2   | 完成 | L.1 测试夹具已整理，Resident DJ 异步 orchestrator 与多 seed 有限并发解析已落地；完整历史见 `tasks/spec/phase-l2-resident-dj-parallel-agents.md`。              |
 | Phase L.3   | 完成 | 移动端本地 Life State Bus、频谱 mode、OnAir/NowPlaying/DJBubble 映射和移动端 Vitest 已落地；完整历史见 `tasks/spec/phase-l3-claudio-life-state-bus.md`。        |
 | Phase L.4   | 完成 | 本地个人记忆写入闭环已落地：listening event API、移动端收藏/切歌/反馈上报、来源防护和保守 feedback 识别；完整历史见 `tasks/spec/phase-l4-personal-memory-loop.md`。 |
+| Phase L.5   | 完成 | 会话 Presence Engine 已落地：服务端连续状态、Resident DJ 轻量曲线偏置、切歌反馈和移动端 visual tone；完整历史见 `tasks/spec/phase-l5-claudio-presence-engine.md`。 |
 
 ---
 

@@ -53,6 +53,12 @@ import {
   type ClaudioLifeState,
 } from './_utils/claudioLifeState';
 import { shouldRecordMusicFeedback } from './_utils/listeningFeedback';
+import {
+  derivePresenceVisualTone,
+  getPresenceToneVisualPatch,
+  mapPresenceToneToSpectrumMode,
+  type PresenceVisualTone,
+} from './_utils/presenceVisualTone';
 import { mapApiTrackToRadioTrack, mapApiTracksToRadioTracks } from './_utils/trackMapping';
 
 /* DJ 默认文案：服务端未接入前的首屏提示，不再作为业务响应来源 */
@@ -152,8 +158,21 @@ const CLAUDIO_LIFE_VISUALS = {
  * 把 Claudio 生命状态映射成 UI primitive props。
  * UI 包不理解移动端业务状态，只接收展示文案、颜色和频谱强度。
  */
-function getClaudioLifeVisualState(state: ClaudioLifeState): ClaudioLifeVisualState {
-  return CLAUDIO_LIFE_VISUALS[state];
+function getClaudioLifeVisualState(
+  state: ClaudioLifeState,
+  presenceTone: PresenceVisualTone,
+): ClaudioLifeVisualState {
+  const base = CLAUDIO_LIFE_VISUALS[state];
+  const patch =
+    state === 'listening' || state === 'breathing' || state === 'sleeping'
+      ? getPresenceToneVisualPatch(presenceTone)
+      : {};
+
+  return {
+    ...base,
+    ...patch,
+    spectrumMode: mapPresenceToneToSpectrumMode(presenceTone, base.spectrumMode),
+  };
 }
 
 /*
@@ -403,7 +422,13 @@ export default function HomeScreen() {
     stationPaused,
     stationPlaying: station.stationPlaying,
   });
-  const claudioLifeVisual = getClaudioLifeVisualState(claudioLifeState);
+  const presenceVisualTone = derivePresenceVisualTone({
+    lifeState: claudioLifeState,
+    latestUserText: latestUserMessage?.text,
+    stationPaused,
+    listening: animationActive,
+  });
+  const claudioLifeVisual = getClaudioLifeVisualState(claudioLifeState, presenceVisualTone);
 
   /*
    * 同一首歌只触发一次预热：用 ref 记录已经发起预热的 track url。

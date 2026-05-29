@@ -25,6 +25,11 @@ import {
   getTrackKey,
 } from '../radio/playbackQueue.js';
 import {
+  createPresenceState,
+  updatePresenceFromPlaybackMove,
+  type DjSessionPresence,
+} from '../radio/presenceEngine.js';
+import {
   createSessionMemory,
   markTrackSeen,
   maybeRefillQueue as maybeRefillSessionQueue,
@@ -51,6 +56,7 @@ interface RadioState {
   activeIntent: RadioSessionIntent | null;
   sessionMemory: ReturnType<typeof createSessionMemory>;
   trackCommentaryMemory: ReturnType<typeof createTrackCommentaryMemory>;
+  presence: DjSessionPresence;
 }
 
 export interface ChatResult {
@@ -70,6 +76,7 @@ const radioState: RadioState = {
   activeIntent: null,
   sessionMemory: createSessionMemory(),
   trackCommentaryMemory: createTrackCommentaryMemory(),
+  presence: createPresenceState(),
 };
 
 let chatQueue: Promise<void> = Promise.resolve();
@@ -171,6 +178,7 @@ async function handleChatInternal(request: ChatRequest): Promise<ChatResult> {
     playbackState: radioState.playbackState,
     currentTrack: radioState.currentTrack,
     recentTracks: radioState.queue.slice(0, radioState.currentIndex + 1).map(cloneTrack),
+    presence: radioState.presence,
   });
 
   /* 队列翻篇或清空时取消旧预热任务，再由提交后的真实队列重新调度。 */
@@ -197,6 +205,7 @@ async function handleChatInternal(request: ChatRequest): Promise<ChatResult> {
   radioState.queue = plan.queue;
   radioState.currentIndex = 0;
   radioState.activeIntent = plan.activeIntent;
+  radioState.presence = plan.presence;
   resetSessionMemory(plan.queue);
   radioState.messages = [...radioState.messages, plan.response].slice(-20);
 
@@ -274,6 +283,10 @@ function moveToQueueIndex(index: number, cause: 'next' | 'previous'): PlaybackMo
   radioState.currentIndex = index;
   radioState.currentTrack = cloneTrack(track);
   radioState.playbackState = 'playing';
+  radioState.presence = updatePresenceFromPlaybackMove({
+    current: radioState.presence,
+    cause,
+  });
 
   const nextTrack = radioState.queue[radioState.currentIndex + 1] ?? null;
   if (nextTrack) schedulePreload(nextTrack);
