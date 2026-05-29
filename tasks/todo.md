@@ -83,6 +83,24 @@
 - 暂不采纳：`profileStore.ts`、`residentDj.ts` 文件偏大是真实结构债，但当前拆分收益低于回归风险。
 - 暂不采纳：`PetCompanion` 使用 SVG 是事实，但当前状态频率和 prototype 目标可接受；迁移 Skia 应等更高频形变需求明确后再做。
 
+---
+
+## 当前任务 · Foundation R1 Profile Parser 边界
+
+- [x] 新增 `profileParsers.ts`：承接 playlists / simple-playlists / jsonl / routines / mood-rules 解析逻辑。
+- [x] 收窄 `profileStore.ts`：只保留文件 IO、append-only 事件写入和 profile 目录入口。
+- [x] 保持现有资料格式、返回结构和测试行为不变。
+- [x] 新增纯 parser 测试，避免解析层只靠 IO 测试间接保护。
+- [x] 终端命令：运行 `pnpm test`。
+- [x] 终端命令：涉及个人资料和 `/api/chat` 入口后运行 `pnpm test:full`。
+
+### Foundation R1 Review
+
+- 结果：`profileStore.ts` 从 765 行收窄到 162 行，只保留资料目录读取、append-only listening event 写入和入口编排。
+- 结果：新增 `profileParsers.ts` 作为纯解析层，承接 playlists / simple-playlists / insights / events / routines / mood-rules。
+- 验证：终端命令 `pnpm test` 通过；移动端 6 个测试文件 / 31 个测试，服务端 16 个测试文件 / 72 个测试通过。
+- 验证：终端命令 `pnpm test:full` 通过；server build、结构烟测和 forced-no-result 分支通过。
+
 ### Phase M Review
 
 - 结果：用户可在 App SOURCE 面板粘贴 LX-compatible 源脚本，服务端先验证再启用。
