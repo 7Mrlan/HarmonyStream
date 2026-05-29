@@ -38,6 +38,9 @@
 | Phase M | 完成 | App SOURCE 面板、用户源验证 / 启用 / 回滚、LX worker 验证和 provider cache reset 已落地；归档见 `tasks/spec/phase-m-user-music-source-import-ui.md`。 |
 | Phase Pet | 完成 | `PetCompanion` prototype 已接入 Life / Presence，支持拖拽、收起、关闭和角色本体部件变化；归档见 `tasks/spec/phase-pet-companion-prototype.md`。 |
 | Phase N | 完成 | Web Audio analyser 优先，Native / 能力不足时使用明确标记的 playback envelope fallback；归档见 `tasks/spec/phase-n-real-audio-breath.md`。 |
+| DeepSeek 复核 | 完成 | 采纳 mood-rules 驱动和 chatTurnPlanner 编排测试；SVG Pet 与大文件拆分按风险分阶段处理。 |
+| Foundation R1 | 完成 | `profileStore.ts` 收窄为 IO 入口，解析逻辑迁到 `profileParsers.ts` 并补纯 parser 测试。 |
+| Foundation R2 | 完成 | Resident DJ 情绪和 Critic 边界拆出到 `djMood.ts` / `djCritic.ts`，主编排继续保持兼容导出。 |
 
 ---
 
@@ -47,24 +50,6 @@
 - 终端窗口操作：仍不生效时，在运行 Expo 的终端窗口按 `Ctrl + C` 停掉 Metro。
 - 终端命令：`pnpm --filter @claudio/mobile dev -- --clear`
 - 浏览器操作：重新打开 Expo Web 页面并再次硬刷新。
-
----
-
-## 当前任务 · L.5 后续主线收束
-
-- [x] Phase M：用户音源导入 UI
-- [x] Phase M Review：安全、回滚、失败不影响播放、默认双源仍可用
-- [x] Phase M 验证：终端命令 `pnpm test`；终端命令 `pnpm test:full`
-- [x] Phase M Commit：`feat: add music source import ui`
-- [x] Phase Pet：Claudio 灵动系统伴侣 prototype
-- [x] Phase Pet Review：状态一眼可分、动态不是外层位移、不遮挡主流程、性能不拖累播放器
-- [x] Phase Pet 验证：终端命令 `pnpm test`
-- [x] Phase Pet Commit：`feat: add claudio companion prototype`
-- [x] Phase N：真实音频律动
-- [x] Phase N Review：真实 Web Audio 优先、fallback 明确标记、不新建第二播放器、不污染 UI 包业务边界
-- [x] Phase N 验证：终端命令 `pnpm test`；终端命令 `pnpm test:full`
-- [x] Phase N Commit：`feat: add real audio breath`
-- [x] 最终推送：终端命令 `git push origin lwx`
 
 ---
 
@@ -101,26 +86,21 @@
 - 验证：终端命令 `pnpm test` 通过；移动端 6 个测试文件 / 31 个测试，服务端 16 个测试文件 / 72 个测试通过。
 - 验证：终端命令 `pnpm test:full` 通过；server build、结构烟测和 forced-no-result 分支通过。
 
-### Phase M Review
+## 当前任务 · Foundation R2 Resident DJ 边界拆分
 
-- 结果：用户可在 App SOURCE 面板粘贴 LX-compatible 源脚本，服务端先验证再启用。
-- 安全：脚本文本不进入公开状态响应；生产验证仍走 LX child_process worker，不在 Fastify 主进程执行用户脚本。
-- 回滚：回滚默认源只禁用本地用户源，不删除脚本，默认双源池仍可用。
-- 验证：终端命令 `pnpm test` 通过；终端命令 `pnpm test:full` 通过。
+- [x] 核对 `residentDj.ts` 过大问题：主文件仍同时承接 mood fallback、编排、策展和 Critic。
+- [x] 新增 `djMood.ts`：承接 mood-rules 优先和内置情绪 fallback。
+- [x] 新增 `djCritic.ts`：承接主播文案审查、结构化计划审查和安全降级文案。
+- [x] 保持 `residentDj.ts` 对外导出兼容，避免改动 `chatTurnPlanner` 调用方。
+- [x] 终端命令：运行 `pnpm --filter server test`。
+- [x] 终端命令：运行 `pnpm test`。
+- [x] 终端命令：涉及 `/api/chat` 编排路径，运行 `pnpm test:full`。
 
-### Phase Pet Review
+### Foundation R2 Review
 
-- 结果：Claudio Signal Keeper 已作为系统伴侣 prototype 接入主界面。
-- 结果：宠物状态来自 L.5 Life / Presence，不另造无来源假状态。
-- 边界：角色本体部件会变化；当前 `listen` 不宣称真实 FFT。
-- 验证：终端命令 `pnpm test` 通过。
-
-### Phase N Review
-
-- 结果：Web 端优先复用已有 audio element 接 Web Audio analyser；Native 或能力不足时走播放进度 envelope fallback。
-- 结果：`MusicSpectrum` 只消费 `intensity / intensitySource` primitive props，不理解移动端业务状态。
-- 性能：Web Audio 强度约 12fps 发布，Web canvas effect 不因强度变化反复重建。
-- 边界：fallback 来源明确为 `playback-envelope / idle / off`，不宣称真实 PCM / FFT。
-- 审查：独立审查 AI 指出全 0 analyser 误标真实、多 audio 误采 TTS 等风险；已补静默降级、URL 匹配和 adapter 测试。
-- 验证：终端命令 `pnpm test` 通过；移动端 6 个测试文件 / 31 个测试，服务端 14 个测试文件 / 68 个测试通过。
+- 结果：`residentDj.ts` 从 997 行收窄到 786 行，主文件继续保留编排、记忆证据和策展逻辑。
+- 结果：情绪 fallback 中文词表已从主编排文件移到 `djMood.ts`，`mood-rules.md` 仍保持优先。
+- 结果：Critic 逻辑已从主编排文件移到 `djCritic.ts`，不改变播放队列、不伪造播放结果。
+- 验证：终端命令 `pnpm --filter server test` 通过；服务端 16 个测试文件 / 72 个测试通过。
+- 验证：终端命令 `pnpm test` 通过；全仓 typecheck、移动端 6 个测试文件 / 31 个测试、服务端 16 个测试文件 / 72 个测试通过。
 - 验证：终端命令 `pnpm test:full` 通过；server build、结构烟测和 forced-no-result 分支通过。

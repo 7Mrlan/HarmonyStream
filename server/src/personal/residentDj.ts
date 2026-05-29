@@ -5,7 +5,7 @@
  * 再把策展候选交给真实音乐源解析。
  */
 
-import type { ChatResponse, Track } from '@claudio/api';
+import type { Track } from '@claudio/api';
 import type { MusicSearchSeed } from '../music/types.js';
 import type { MusicRequestKind } from '../radio/intentParser.js';
 import {
@@ -13,8 +13,14 @@ import {
   buildPresencePromptLine,
   type DjSessionPresence,
 } from '../radio/presenceEngine.js';
+import { reviewResidentDjPlan } from './djCritic.js';
+import {
+  hasFocusSignal,
+  hasMeetingSignal,
+  readMoodSignal,
+  type MoodSignal,
+} from './djMood.js';
 import type {
-  ComfortMode,
   CriticReport,
   CuratedCandidate,
   CuratedCandidateSlot,
@@ -23,7 +29,6 @@ import type {
   MemoryEvidence,
   MusicLibrarySection,
   MusicLibraryTrack,
-  MoodRule,
   PersonalCandidate,
   PersonalContext,
   PlaylistShape,
@@ -31,6 +36,12 @@ import type {
   ResidentDjPlan,
   ResidentIntent,
 } from './profileTypes.js';
+
+export {
+  applyCriticReportToResponse,
+  reviewDjHostResponse,
+} from './djCritic.js';
+export type { ReviewDjHostResponseInput } from './djCritic.js';
 
 export interface BuildResidentDjPlanInput {
   /* 用户原始输入。 */
@@ -55,23 +66,6 @@ export interface ResidentDjAgentOverrides {
   moodCompanion?: (input: ResidentDjAgentInput) => MemoryEvidence[] | Promise<MemoryEvidence[]>;
   libraryInsightReader?: (input: ResidentDjAgentInput) => MemoryEvidence[] | Promise<MemoryEvidence[]>;
   recentBehaviorAnalyzer?: (input: ResidentDjAgentInput) => MemoryEvidence[] | Promise<MemoryEvidence[]>;
-}
-
-export interface ReviewDjHostResponseInput {
-  /* 即将返回给用户的 ChatResponse。 */
-  response: ChatResponse;
-  /* 本轮 Resident DJ 规划，可选用于生成降级话术。 */
-  turnPlan?: DjTurnPlan;
-  /* 已解析出的真实可播放曲目。 */
-  selectedTrack?: Track;
-  /* 是否存在真实本机资料。 */
-  hasUserData: boolean;
-}
-
-interface MoodSignal {
-  comfortMode: ComfortMode;
-  energyCurve: EnergyCurve;
-  constraints: string[];
 }
 
 export interface ScoredSection {
@@ -99,12 +93,6 @@ interface ResidentDjAgentResult<T> {
   value: T;
   timing: ResidentDjAgentTiming;
 }
-
-const SAD_WORDS = ['难过', '伤心', '低落', '崩溃', '难受', '不开心', 'emo', '失落', '撑不住'];
-const HAPPY_WORDS = ['开心', '高兴', '快乐', '好爽', '爽', '太好了', '兴奋', '庆祝', '赢了'];
-const FOCUS_WORDS = ['专注', '写代码', '工作', '学习', '不抢', '轻一点', '安静', '效率'];
-const MEETING_WORDS = ['会议', '开会', '会后', '刚开完会', 'meeting', '累'];
-const NOSTALGIA_WORDS = ['怀旧', '老歌', '以前', '回忆', '旧歌', '经典'];
 
 /*
  * 构建 Resident DJ 本轮计划。
@@ -251,58 +239,6 @@ export function curatedCandidatesToTitles(candidates: CuratedCandidate[]): strin
 }
 
 /*
- * 自动审查最终主播文案。
- * Critic 只检查输出风险，不改变播放队列；需要降级时由调用方替换 say。
- */
-export function reviewDjHostResponse(input: ReviewDjHostResponseInput): CriticReport {
-  const issues: string[] = [];
-  const say = input.response.say.trim();
-
-  if (/我(?:完全|最|真的)?懂你(?:的)?(?:所有|全部|一切)?(?:故事|经历|痛苦|快乐)/u.test(say)) {
-    issues.push('假装完全理解用户经历');
-  }
-  if (/(?:一定|保证|肯定).{0,8}(?:治愈|治好|让你好起来|解决)/u.test(say)) {
-    issues.push('承诺治疗或确定性疗效');
-  }
-  if (/(?:心理医生|心理咨询|诊断|处方|治疗方案)/u.test(say)) {
-    issues.push('越界成心理咨询');
-  }
-  if (!input.hasUserData && /(?:你常|你平时|你的资料|你以前|你总是|你收藏)/u.test(say)) {
-    issues.push('无资料时假装了解用户');
-  }
-  if (/(?:音源|接口|provider|API|JSON|模型)/iu.test(say)) {
-    issues.push('泄露内部系统细节');
-  }
-
-  return {
-    ok: issues.length === 0,
-    issues,
-    ...(issues.length > 0
-      ? { safeSay: buildSafeSay(input.turnPlan, input.selectedTrack) }
-      : {}),
-  };
-}
-
-/*
- * 根据 Critic 结果降级文案。
- * 真实曲目已解析成功，所以只替换话术，不改 play 和队列。
- */
-export function applyCriticReportToResponse(
-  response: ChatResponse,
-  report: CriticReport,
-  selectedTrack: Track,
-): ChatResponse {
-  if (report.ok) return response;
-
-  return {
-    ...response,
-    say: report.safeSay ?? buildSafeSay(undefined, selectedTrack),
-    play: [selectedTrack.title],
-    reason: `${response.reason ?? 'Resident DJ 已选出可播放曲目'}；Critic 降级：${report.issues.join('，')}`,
-  };
-}
-
-/*
  * Design Director Agent。
  * 只决定本轮策略，不直接选最终播放歌曲。
  */
@@ -322,108 +258,6 @@ function buildTurnPlan(input: BuildResidentDjPlanInput, moodSignal: MoodSignal):
   };
 
   return applyPresenceToTurnPlan(basePlan, input.presence);
-}
-
-/*
- * Mood Companion Agent。
- * 识别陪伴尺度和曲线，保持“能陪但不装治疗师”的边界。
- */
-function readMoodSignal(userText: string, moodRule?: MoodRule): MoodSignal {
-  const configuredSignal = moodRule ? buildMoodRuleSignal(moodRule) : null;
-  if (configuredSignal) return configuredSignal;
-
-  const text = normalizeText(userText);
-  if (containsAny(text, HAPPY_WORDS)) {
-    return {
-      comfortMode: 'celebrate',
-      energyCurve: 'bright',
-      constraints: ['可以一起开心', '不要说教', '不要压低情绪'],
-    };
-  }
-  if (containsAny(text, SAD_WORDS)) {
-    return {
-      comfortMode: text.includes('振作') || text.includes('好起来') ? 'lift-gently' : 'sit-with-you',
-      energyCurve: 'rise-gently',
-      constraints: ['先接住情绪', '不承诺治愈', '不写鸡汤', '播放不能被深聊阻塞'],
-    };
-  }
-  if (containsAny(text, FOCUS_WORDS) || containsAny(text, MEETING_WORDS)) {
-    return {
-      comfortMode: 'focus-with-you',
-      energyCurve: containsAny(text, MEETING_WORDS) ? 'low-stable' : 'deep-focus',
-      constraints: ['低刺激', '不抢注意力', '少说话'],
-    };
-  }
-  if (containsAny(text, NOSTALGIA_WORDS)) {
-    return {
-      comfortMode: 'nostalgia-soft',
-      energyCurve: 'wind-down',
-      constraints: ['怀旧但不煽情', '不要编用户故事'],
-    };
-  }
-  return {
-    comfortMode: 'neutral',
-    energyCurve: 'low-stable',
-    constraints: ['只讲本轮听感', '不要假装懂用户'],
-  };
-}
-
-/*
- * 把 mood-rules.md 命中的规则转换成 Resident DJ 策略。
- * 用户可在规则里显式写 comfort / curve；未写时只做保守推断，推断不出来就回到内置词表。
- */
-function buildMoodRuleSignal(rule: MoodRule): MoodSignal | null {
-  const comfortMode = rule.comfortMode ?? inferComfortModeFromMoodRule(rule);
-  if (!comfortMode) return null;
-
-  const energyCurve = rule.energyCurve ?? defaultEnergyCurveForComfort(comfortMode);
-  const constraints = [
-    ...defaultConstraintsForComfort(comfortMode),
-    ...(rule.constraints ?? []),
-    rule.note ? `用户情绪规则备注：${rule.note}` : '',
-    rule.preferredTags.length > 0 ? `优先参考标签：${rule.preferredTags.join('、')}` : '',
-    `mood-rules.md 命中：${rule.mood}`,
-  ];
-
-  return {
-    comfortMode,
-    energyCurve,
-    constraints: dedupeStrings(constraints.filter(Boolean)),
-  };
-}
-
-/* mood-rules.md 未显式写 comfort 时，按规则名和标签做轻量推断。 */
-function inferComfortModeFromMoodRule(rule: MoodRule): ComfortMode | null {
-  const text = normalizeText(
-    [rule.mood, ...rule.preferredTags, ...(rule.constraints ?? []), rule.note ?? ''].join(' '),
-  );
-  if (containsAny(text, HAPPY_WORDS)) return 'celebrate';
-  if (containsAny(text, SAD_WORDS) || containsAny(text, ['伤感', '陪伴', '安慰'])) {
-    return 'sit-with-you';
-  }
-  if (containsAny(text, FOCUS_WORDS) || containsAny(text, MEETING_WORDS)) return 'focus-with-you';
-  if (containsAny(text, NOSTALGIA_WORDS)) return 'nostalgia-soft';
-  return null;
-}
-
-/* 按陪伴模式给出默认曲线。 */
-function defaultEnergyCurveForComfort(comfortMode: ComfortMode): EnergyCurve {
-  if (comfortMode === 'celebrate') return 'bright';
-  if (comfortMode === 'sit-with-you' || comfortMode === 'lift-gently') return 'rise-gently';
-  if (comfortMode === 'focus-with-you') return 'deep-focus';
-  if (comfortMode === 'nostalgia-soft') return 'wind-down';
-  return 'low-stable';
-}
-
-/* 按陪伴模式给出默认约束。 */
-function defaultConstraintsForComfort(comfortMode: ComfortMode): string[] {
-  if (comfortMode === 'celebrate') return ['可以一起开心', '不要说教', '不要压低情绪'];
-  if (comfortMode === 'sit-with-you' || comfortMode === 'lift-gently') {
-    return ['先接住情绪', '不承诺治愈', '不写鸡汤', '播放不能被深聊阻塞'];
-  }
-  if (comfortMode === 'focus-with-you') return ['低刺激', '不抢注意力', '少说话'];
-  if (comfortMode === 'nostalgia-soft') return ['怀旧但不煽情', '不要编用户故事'];
-  return ['只讲本轮听感', '不要假装懂用户'];
 }
 
 /* 判断本轮 Resident DJ 意图。 */
@@ -496,11 +330,11 @@ function scoreLibrarySection(
     score += 6;
     reasons.push('当前接近夜尾');
   }
-  if (containsAny(text, MEETING_WORDS) && hasSectionSignal(section, ['会议间', '会议'])) {
+  if (hasMeetingSignal(text) && hasSectionSignal(section, ['会议间', '会议'])) {
     score += 9;
     reasons.push('用户提到会议后的疲惫');
   }
-  if (containsAny(text, FOCUS_WORDS) && hasSectionSignal(section, ['专注', '低刺激'])) {
+  if (hasFocusSignal(text) && hasSectionSignal(section, ['专注', '低刺激'])) {
     score += 5;
     reasons.push('用户需要不抢注意力');
   }
@@ -842,31 +676,6 @@ function describeSlot(slot: CuratedCandidateSlot, curve: EnergyCurve): string {
   return '中段保持这一段状态';
 }
 
-/* Critic Agent 审查结构化计划。 */
-function reviewResidentDjPlan(
-  turnPlan: DjTurnPlan,
-  candidates: CuratedCandidate[],
-  personalContext: PersonalContext,
-): CriticReport {
-  const issues: string[] = [];
-  const titles = candidates.map((candidate) => normalizeText(candidate.title));
-
-  if (candidates.length === 0 && personalContext.hasUserData) {
-    issues.push('有用户资料但没有策展候选');
-  }
-  if (turnPlan.targetCount > 1 && new Set(titles).size < Math.min(2, titles.length)) {
-    issues.push('候选过度重复，疑似固定映射');
-  }
-  if (candidates.some((candidate) => candidate.source !== 'from-user-library' && !candidate.reason)) {
-    issues.push('非用户资料候选缺少来源说明');
-  }
-
-  return {
-    ok: issues.length === 0,
-    issues,
-  };
-}
-
 /* 构造传给 prompt 的 Resident DJ 压缩上下文。 */
 function buildResidentPromptLines(
   turnPlan: DjTurnPlan,
@@ -895,21 +704,6 @@ function buildResidentPromptLines(
     `Resident DJ 策展候选：${candidateLine}`,
     `Resident DJ 审查：${critic.ok ? '通过' : critic.issues.join('；')}`,
   ].filter((line): line is string => Boolean(line));
-}
-
-/* 构造安全降级话术。 */
-function buildSafeSay(turnPlan: DjTurnPlan | undefined, selectedTrack: Track | undefined): string {
-  const title = selectedTrack?.title ? `《${selectedTrack.title}》` : '这首';
-  if (turnPlan?.comfortMode === 'celebrate') {
-    return `这个状态可以别压着，先放 ${title}。它负责把亮度打开，我就不在旁边说教了。`;
-  }
-  if (turnPlan?.comfortMode === 'sit-with-you' || turnPlan?.comfortMode === 'lift-gently') {
-    return `听出来你现在不太想被硬劝好，先放 ${title}。它只陪你走一小段，不把话说满。`;
-  }
-  if (turnPlan?.comfortMode === 'focus-with-you') {
-    return `先不抢你的注意力，${title} 接上。让它在旁边铺一层，别把人推着走。`;
-  }
-  return `那就先放 ${title}。我不把它讲满，先听开头怎么把这一段接住。`;
 }
 
 /* 分组是否带有某类语义信号。 */
@@ -951,11 +745,6 @@ function stableHash(value: string): number {
     hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
   }
   return hash;
-}
-
-/* 判断文本是否包含关键词。 */
-function containsAny(text: string, words: string[]): boolean {
-  return words.some((word) => text.includes(normalizeText(word)));
 }
 
 /* 格式化旧候选理由。 */
