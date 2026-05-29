@@ -72,6 +72,13 @@ export interface MusicSearchInput {
   limit: number;
 }
 
+export interface MusicSearchSeed {
+  /* 候选歌名。 */
+  title: string;
+  /* 候选歌手；只用于构造 provider 搜索词，不进公开 Track。 */
+  artist?: string;
+}
+
 export interface MusicProvider {
   /* provider 自描述。 */
   manifest: MusicProviderManifest;

@@ -6,15 +6,13 @@
 
 ## 当前规则
 
-- 中等及以上任务：先写分段 Spec，用户确认后再编码。
+- 中等及以上任务：先写 Spec；本轮用户已授权 Phase M / Phase Pet / Phase N 连续执行，不再逐段等待确认。
 - 当前阶段若发现偏差：先更新 Spec，再改代码。
 - 完成任务必须给验证证据：类型检查、请求结果、运行日志或可操作验收步骤。
 - 阶段验收通过后必须归档完整 Spec 到 `tasks/spec/<phase>.md`，`spec.md` 只保留跨阶段决策、当前阶段和已完成摘要。
-- `spec.md` 超过 250 行时检查是否有已完成阶段未归档；`todo.md` 超过 120 行时先压缩已完成任务。
 - 涉及 `packages/*` 后，如果页面没变，先按 Metro / 浏览器缓存陷阱排查。
-- 所有“运行 / 重启 / 打开 / 点击”步骤必须标明执行载体。
-- Claudio 永远是音乐电台：评论区 / 对话输入是点歌和推荐入口，不新增独立搜索框；LLM 主播负责理解意图、策划选曲、讲短背景和过渡。
-- 默认音乐源使用已验证的 LX-compatible 链路：huibq 源 raw URL + Kuwo 候选搜索；用户仍可通过 env 配置覆盖源脚本或候选 resolver。
+- Claudio 的核心是个人音乐记忆驱动的 AI 电台；视觉、宠物和律动都必须消费真实状态，不做无来源假高级。
+- 默认音乐源使用已验证的 LX-compatible 链路；用户源导入必须继续走服务端 worker 沙箱。
 
 ---
 
@@ -22,48 +20,24 @@
 
 **AI 电台最小闭环**
 
-- [x] Phase A：后端 API 骨架与内存电台状态
-- [x] Phase B：移动端接入服务端 API
-- [x] Phase C：LLM 主播最小接入
-- [x] Phase C+：主播等待体验与电台调频加载动画
-- [x] Phase D：音乐来源接入，优先服务端返回真实 `Track`
-- [x] Phase D.5：音源与播放性能地基，流式传输 / 缓存 / 预加载
-- [x] Phase E：TTS 入声与 `tts-ready` 推送
-- [x] Phase G.1：LX-compatible 服务端 Bridge
-- [x] Phase G.2-pre：评论区驱动真实音乐闭环
-- [x] Phase G.2-default：默认真实音乐源
-- [x] Phase H：电台播放控制语义重整
-- [x] Phase I：默认 LX 双源池 + FLAC 优先
-- [x] Phase J：队列与推荐体验收口
-- [x] Phase F：后台播放、锁屏控制、APK release、长时运行等产品化任务
-- [ ] Phase K：歌曲像素海报
-- [ ] Phase L：用户歌单 JSON 偏好
-- [ ] Phase M：用户音源导入 UI
-- [ ] Phase N：真实音频律动
+- [x] Phase A-E：HTTP / WS、移动端 API、LLM 主播、真实音乐源、TTS talk-over 主链路
+- [x] Phase G-J：LX Bridge、默认真实源、播放控制、队列和自动化测试入口
+- [x] Phase F：后台播放、锁屏 metadata、APK 构建入口、WS 重连和 graceful shutdown
+- [x] Phase L.0-L.5：个人音乐记忆、Resident DJ、多智能体、Life State、Personal Memory Loop、Presence Engine
+- [x] Phase M：用户音源导入 UI
+- [x] Phase Pet：Claudio 灵动系统伴侣 prototype
+- [x] Phase N：真实音频律动
+- [ ] Phase K：歌曲像素海报（本轮暂缓）
 
 ---
 
 ## 已完成摘要
 
-| 阶段                       | 状态 | 摘要                                                                                                                                              |
-| -------------------------- | ---: | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| UI 动画架构                | 完成 | 高频动画准入规则已沉淀：Reanimated + Skia / Web canvas。                                                                                          |
-| Phase A-E                  | 完成 | HTTP / WS、移动端 API、LLM 主播、真实音乐源、TTS talk-over 主链路已打通；详细决策见 `tasks/spec.md` §6。                                          |
-| NativeWind / SDK 56        | 完成 | React / RN / Expo / NativeWind 类型链路和 SDK 56 矩阵已清理并验证通过。                                                                           |
-| Phase G.1                  | 完成 | 服务端 LX-compatible Bridge 接入 provider chain，用户源脚本在 child_process worker 内隔离执行；详见 `tasks/spec.md` §10。                         |
-| Phase G.2-pre/default      | 完成 | `/api/chat` 以评论区为唯一入口，LLM 意图 + Kuwo 候选搜索 + LX Bridge 组成默认真实音乐链路。                                                       |
-| 情绪类点歌误判             | 完成 | “想听伤感的歌曲”不再被当成《伤感》精确搜歌，改为情绪 / 类型推荐路径。                                                                             |
-| explame AI 审查复核        | 完成 | 采纳预加载中断、服务端并发、标题匹配、ducking 高频调用、TTS cache 淘汰等真实问题；忽略不符合个人开源目标的鉴权/CORS建议。                         |
-| radioState God Object 拆分 | 完成 | 新增 `server/src/radio/intentParser.ts`、`server/src/radio/djCopy.ts`，`radioState.ts` 保留状态与编排，对外 API 不变。                            |
-| 播放控制回归修复           | 完成 | 恢复播放按钮可用、TTS 暂停/续播和 VOICE OFF 过期 TTS 防护；后续 Phase H 重新梳理完整控制语义。                                                    |
-| Phase H                    | 完成 | 主播放按钮统一为电台总控，VOICE 只管主播自动播报，上一首 / 下一首走服务端 queue currentIndex。                                                    |
-| Phase I                    | 完成 | 默认真实源已改为 `server/assets/lx-sources` 内置双源池，`server/data/lx-sources` 只作本机私有覆盖，FLAC 优先链路已验证。                          |
-| Phase J                    | 完成 | 单曲 / 情绪 / 多首请求队列语义、按钮禁用、后台续推、切歌短播报与 track-aware TTS 保护已通过验收。                                                 |
-| Phase J.1                  | 完成 | `radioState.ts` 第一轮拆分完成，模型、队列、session 续推、切歌播报已拆到独立模块；详见 `tasks/spec/phase-j1-radio-state-orchestration-split.md`。 |
-| Phase J.2                  | 完成 | `chatTurnPlanner.ts` 抽离完成，`radioState.ts` 只保留状态提交和播放副作用；详见 `tasks/spec/phase-j2-chat-turn-planner.md`。                      |
-| Phase J.3                  | 完成 | 根 `pnpm test` / `pnpm test:full` 两层自动化测试入口已建立；详见 `tasks/spec/phase-j3-automated-test-entry.md`。                                  |
-| Phase F                    | 完成 | 后台播放、锁屏 metadata、APK 构建入口、WS 重连和 graceful shutdown 已完成；详见 `tasks/spec/phase-f-productization.md`。                          |
-| 小米 TTS 默认              | 完成 | 删除 Edge TTS，默认 MiMo；修复 `requestKind` 接线和 TTS cache 维度，`pnpm test:full` 通过。                                                       |
+| 阶段 | 状态 | 摘要 |
+| --- | ---: | --- |
+| Phase M | 完成 | App SOURCE 面板、用户源验证 / 启用 / 回滚、LX worker 验证和 provider cache reset 已落地；归档见 `tasks/spec/phase-m-user-music-source-import-ui.md`。 |
+| Phase Pet | 完成 | `PetCompanion` prototype 已接入 Life / Presence，支持拖拽、收起、关闭和角色本体部件变化；归档见 `tasks/spec/phase-pet-companion-prototype.md`。 |
+| Phase N | 完成 | Web Audio analyser 优先，Native / 能力不足时使用明确标记的 playback envelope fallback；归档见 `tasks/spec/phase-n-real-audio-breath.md`。 |
 
 ---
 
@@ -76,11 +50,43 @@
 
 ---
 
-## Phase Pet：⏸ 暂停 · 等待用户重启
+## 当前任务 · L.5 后续主线收束
 
-- [x] 调研 QQ 宠物参考实现（`qqpet_automation`），提取可借鉴模式
-- [x] 技术路线比较（Skia / Rive / Lottie / WebView）→ 最终选定 Rive
-- [x] Skia 程序化 prototype 验证（已通过 typecheck/lint/test）→ 判定为废案，代码已删除
-- [x] Spec 重构：切换为 Rive 路线，移除硬性角色设定，标记暂停
-- [ ] 用户完成 Rive 角色动画资产（.riv 文件）
-- [ ] 用户通知重启 Phase Pet
+- [x] Phase M：用户音源导入 UI
+- [x] Phase M Review：安全、回滚、失败不影响播放、默认双源仍可用
+- [x] Phase M 验证：终端命令 `pnpm test`；终端命令 `pnpm test:full`
+- [x] Phase M Commit：`feat: add music source import ui`
+- [x] Phase Pet：Claudio 灵动系统伴侣 prototype（Skia 版）
+- [x] Phase Pet Review：状态一眼可分、动态不是外层位移、不遮挡主流程、性能不拖累播放器
+- [x] Phase Pet 验证：终端命令 `pnpm test`
+- [x] Phase Pet Commit：`feat: add claudio companion prototype`
+- [x] Phase N：真实音频律动
+- [x] Phase N Review：真实 Web Audio 优先、fallback 明确标记、不新建第二播放器、不污染 UI 包业务边界
+- [x] Phase N 验证：终端命令 `pnpm test`；终端命令 `pnpm test:full`
+- [x] Phase N Commit：`feat: add real audio breath`
+- [ ] Phase K：歌曲像素海报（本轮暂缓）
+- [ ] Phase Pet Rive 迁移：用户完成 Rive 角色动画资产后重启（详见 `tasks/spec.md` §15）
+
+### Phase M Review
+
+- 结果：用户可在 App SOURCE 面板粘贴 LX-compatible 源脚本，服务端先验证再启用。
+- 安全：脚本文本不进入公开状态响应；生产验证仍走 LX child_process worker，不在 Fastify 主进程执行用户脚本。
+- 回滚：回滚默认源只禁用本地用户源，不删除脚本，默认双源池仍可用。
+- 验证：终端命令 `pnpm test` 通过；终端命令 `pnpm test:full` 通过。
+
+### Phase Pet Review
+
+- 结果：Skia 分层角色 prototype 已接入主界面，来自 Life / Presence 状态驱动。
+- 结果：状态一眼可分，支持拖拽、收起、关闭。
+- 后续方向：用户确认迁移到 Rive 路线，当前 Skia prototype 作为过渡实现保留。用户自行在 Rive Editor 制作角色动画，完成后通知重启。
+- 验证：终端命令 `pnpm test` 通过。
+
+### Phase N Review
+
+- 结果：Web 端优先复用已有 audio element 接 Web Audio analyser；Native 或能力不足时走播放进度 envelope fallback。
+- 结果：`MusicSpectrum` 只消费 `intensity / intensitySource` primitive props，不理解移动端业务状态。
+- 性能：Web Audio 强度约 12fps 发布，Web canvas effect 不因强度变化反复重建。
+- 边界：fallback 来源明确为 `playback-envelope / idle / off`，不宣称真实 PCM / FFT。
+- 审查：独立审查 AI 指出全 0 analyser 误标真实、多 audio 误采 TTS 等风险；已补静默降级、URL 匹配和 adapter 测试。
+- 验证：终端命令 `pnpm test` 通过；移动端 6 个测试文件 / 31 个测试，服务端 14 个测试文件 / 68 个测试通过。
+- 验证：终端命令 `pnpm test:full` 通过；server build、结构烟测和 forced-no-result 分支通过。

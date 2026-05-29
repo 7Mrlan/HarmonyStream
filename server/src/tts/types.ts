@@ -14,6 +14,17 @@ export type TtsProviderTier = 'owned' | 'external' | 'experimental' | 'fallback'
 /* TTS provider 协议版本号，便于未来兼容性判断。 */
 export const TTS_PROVIDER_API_VERSION = 'claudio-tts-1';
 
+export interface TtsStyle {
+  /* 稳定 key，进入缓存维度，避免不同语气复用同一音频。 */
+  key: string;
+  /* 情绪标签，仅服务端内部使用。 */
+  emotion: string;
+  /* 给 provider 的自然语言风格指令。 */
+  styleInstruction: string;
+  /* 语速；1.0 为常速。 */
+  speed?: number;
+}
+
 /* TTS provider manifest。 */
 export interface TtsManifest {
   /* provider 唯一 id。 */
@@ -34,6 +45,8 @@ export interface TtsManifest {
   timeoutMs: number;
   /* 默认音色。 */
   defaultVoice: string;
+  /* 影响音频输出的 provider 静态范围，例如模型和全局 style。 */
+  cacheScope?: string;
 }
 
 /* 合成入参。 */
@@ -44,6 +57,8 @@ export interface TtsSynthesizeInput {
   voice?: string;
   /* 语速，可选。1.0 为常速。 */
   speed?: number;
+  /* 动态语气，仅服务端内部传递，不扩公开 API。 */
+  style?: TtsStyle;
 }
 
 /* 合成结果：返回原始 buffer，由上层决定写入 audioStore 的 id 与生命周期。 */

@@ -25,6 +25,9 @@ describe('intentParser', () => {
   it('情绪推荐不被当成明确歌名', () => {
     expect(parseExplicitSongRequest('想听伤感的歌曲')).toBeNull();
     expect(parseGenreRecommendationRequest('想听伤感的歌曲')?.mood).toBe('伤感');
+    expect(parseExplicitSongRequest('想听开心的歌')).toBeNull();
+    expect(parseExplicitSongRequest('深夜想听点不吵的歌')).toBeNull();
+    expect(parseExplicitSongRequest('来点怀旧的')).toBeNull();
   });
 
   it('常见 X 的 Y 歌名不被裸 artist/title 规则误拆', () => {

@@ -24,6 +24,21 @@ export function getApiBaseUrl(): string {
 }
 
 /*
+ * 获取 App ↔ Server 共享 token。
+ * 默认不配置；用户需要保护本地记忆写入口时可用 EXPO_PUBLIC_SHARED_TOKEN 对齐服务端 SHARED_TOKEN。
+ */
+export function getApiSharedToken(): string | undefined {
+  const envValue = process.env.EXPO_PUBLIC_SHARED_TOKEN?.trim();
+  if (envValue) return envValue;
+
+  const extra = Constants.expoConfig?.extra;
+  if (!extra || typeof extra !== 'object') return undefined;
+
+  const value = (extra as Record<string, unknown>).sharedToken;
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+/*
  * 读取 Expo public env。
  * Expo 会在构建时内联 EXPO_PUBLIC_*，这里集中读取，便于后续替换配置来源。
  */

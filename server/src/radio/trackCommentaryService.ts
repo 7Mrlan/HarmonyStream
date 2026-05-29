@@ -64,7 +64,9 @@ export function scheduleTrackCommentary(input: ScheduleTrackCommentaryInput): vo
       if (!input.isCurrentTrackKey(trackKey)) return;
       input.broadcast(trackKey, cached);
       if (intent.voiceEnabledAtChat) {
-        scheduleTrackTts(cached.say, trackKey, () => input.isCurrentTrackKey(trackKey));
+        scheduleTrackTts(cached.say, trackKey, () => input.isCurrentTrackKey(trackKey), {
+          style: intent.ttsStyle,
+        });
       }
     }, 0);
     return;
@@ -107,9 +109,14 @@ async function runTrackCommentary(
     input.broadcast(trackKey, response);
 
     if (intent.voiceEnabledAtChat) {
-      scheduleTrackTts(response.say, trackKey, () => input.isCurrentTrackKey(trackKey));
+      scheduleTrackTts(response.say, trackKey, () => input.isCurrentTrackKey(trackKey), {
+        style: intent.ttsStyle,
+      });
     }
   } catch (error) {
-    console.warn('[radio] track commentary failed:', error instanceof Error ? error.message : error);
+    console.warn(
+      '[radio] track commentary failed:',
+      error instanceof Error ? error.message : error,
+    );
   }
 }

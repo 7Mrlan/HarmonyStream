@@ -8,6 +8,12 @@
 import type {
   ChatRequest,
   ChatResponse,
+  ListeningEventRequest,
+  ListeningEventResponse,
+  MusicSourceActivationResponse,
+  MusicSourceImportRequest,
+  MusicSourceImportResponse,
+  MusicSourceStatusResponse,
   ModelsResponse,
   NextResponse,
   NowResponse,
@@ -19,6 +25,8 @@ import type {
 export interface ApiClientOptions {
   /* HTTP API 根地址，例如 http://127.0.0.1:8080 */
   baseUrl?: string;
+  /* App ↔ Server 共享 token；配置后会随 HTTP 请求发送 Authorization。 */
+  authToken?: string;
   /* 测试或特殊运行时可注入 fetch；默认使用 globalThis.fetch */
   fetchImpl?: typeof fetch;
   /* 测试或特殊运行时可注入 WebSocket；默认使用 globalThis.WebSocket */
@@ -56,6 +64,14 @@ export interface ClaudioApiClient {
   playPrevious: () => Promise<PlaybackMoveResponse>;
   /* 发送聊天 */
   sendChat: (request: ChatRequest) => Promise<ChatResponse>;
+  /* 记录本地听歌行为 */
+  recordListeningEvent: (request: ListeningEventRequest) => Promise<ListeningEventResponse>;
+  /* 获取用户音源导入状态 */
+  getMusicSources: () => Promise<MusicSourceStatusResponse>;
+  /* 验证并导入 LX-compatible 用户源 */
+  importMusicSource: (request: MusicSourceImportRequest) => Promise<MusicSourceImportResponse>;
+  /* 启用用户源或回滚默认源 */
+  activateMusicSource: (mode: 'default' | 'user') => Promise<MusicSourceActivationResponse>;
   /* 获取模型列表 */
   getModels: () => Promise<ModelsResponse>;
   /* 切换模型 */
@@ -110,6 +126,7 @@ export function createApiClient(options: ApiClientOptions = {}): ClaudioApiClien
   const baseUrl = resolveApiBaseUrl(options.baseUrl);
   const fetcher = options.fetchImpl ?? globalThis.fetch;
   const WebSocketCtor = options.WebSocketCtor ?? globalThis.WebSocket;
+  const jsonHeaders = buildJsonHeaders(options.authToken);
 
   return {
     getNow: () => requestJson<NowResponse>(fetcher, baseUrl, '/api/now'),
@@ -117,26 +134,65 @@ export function createApiClient(options: ApiClientOptions = {}): ClaudioApiClien
     playNext: () =>
       requestJson<PlaybackMoveResponse>(fetcher, baseUrl, '/api/playback/next', {
         method: 'POST',
+        headers: buildAuthHeaders(options.authToken),
       }),
     playPrevious: () =>
       requestJson<PlaybackMoveResponse>(fetcher, baseUrl, '/api/playback/previous', {
         method: 'POST',
+        headers: buildAuthHeaders(options.authToken),
       }),
     sendChat: (request) =>
       requestJson<ChatResponse>(fetcher, baseUrl, '/api/chat', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: jsonHeaders,
         body: JSON.stringify(request),
+      }),
+    recordListeningEvent: (request) =>
+      requestJson<ListeningEventResponse>(fetcher, baseUrl, '/api/listening-events', {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify(request),
+      }),
+    getMusicSources: () => requestJson<MusicSourceStatusResponse>(fetcher, baseUrl, '/api/music-sources'),
+    importMusicSource: (request) =>
+      requestJson<MusicSourceImportResponse>(fetcher, baseUrl, '/api/music-sources/import', {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify(request),
+      }),
+    activateMusicSource: (mode) =>
+      requestJson<MusicSourceActivationResponse>(fetcher, baseUrl, '/api/music-sources/activate', {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify({ mode }),
       }),
     getModels: () => requestJson<ModelsResponse>(fetcher, baseUrl, '/api/models'),
     switchModel: (id) =>
       requestJson<SwitchModelResponse>(fetcher, baseUrl, '/api/models/switch', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: jsonHeaders,
         body: JSON.stringify({ id }),
       }),
     connectStream: (handlers) => connectStream(WebSocketCtor, resolveStreamUrl(baseUrl), handlers),
   };
+}
+
+/*
+ * 构造 JSON 请求头。
+ * X-Claudio-Client 是本地记忆写入口的来源标记；Authorization 只在用户配置共享 token 时发送。
+ */
+function buildJsonHeaders(authToken: string | undefined): Record<string, string> {
+  return {
+    ...buildAuthHeaders(authToken),
+    'content-type': 'application/json',
+    'x-claudio-client': 'claudio-app',
+  };
+}
+
+/* 构造可选鉴权头。 */
+function buildAuthHeaders(authToken: string | undefined): Record<string, string> {
+  const token = authToken?.trim();
+  return token ? { authorization: `Bearer ${token}` } : {};
 }
 
 /*

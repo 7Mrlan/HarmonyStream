@@ -18,6 +18,7 @@ import { createLxBridgeProvider } from './providers/lxBridgeProvider.js';
 import { createNcmProvider } from './providers/ncmProvider.js';
 import { createLxCandidateSearcher } from './lxBridge/candidateSearch.js';
 import { createLxSourceRuntime } from './lxBridge/sourceRuntime.js';
+import { getActiveLocalLxSourceConfigSync } from './userSourceStore.js';
 import type { LxCandidateSearcher } from './lxBridge/types.js';
 import type { MusicProvider } from './types.js';
 
@@ -72,10 +73,13 @@ export function warmupProviderChain(): void {
   }
 }
 
-/* 测试与热重载场景使用，业务路径不会调用。 */
-export function resetProviderChainCacheForTests(): void {
+/* 重置 provider chain 缓存，用户源导入 / 回滚后需要让下一次解析读取新配置。 */
+export function resetProviderChainCache(): void {
   cachedChain = null;
 }
+
+/* 测试兼容别名。 */
+export const resetProviderChainCacheForTests = resetProviderChainCache;
 
 /*
  * 组装 chain。
@@ -163,15 +167,16 @@ function createConfiguredLxProviders(): Map<string, MusicProvider> {
   const providers = new Map<string, MusicProvider>();
   const candidateSearcher = createSharedLxCandidateSearcher();
 
-  if (hasUserConfiguredLxSource()) {
+  const userSource = resolveConfiguredUserLxSource();
+  if (userSource) {
     providers.set('lx', createLxProviderFromScript({
       key: 'lx',
-      name: env.LX_SOURCE_NAME,
-      description: 'User configured LX-compatible music source',
-      scriptUrl: env.LX_SOURCE_SCRIPT_URL,
-      scriptFile: env.LX_SOURCE_SCRIPT_FILE,
-      sourceId: env.LX_SOURCE_ID,
-      sourceName: env.LX_SOURCE_NAME,
+      name: userSource.sourceName,
+      description: userSource.description,
+      scriptUrl: userSource.scriptUrl,
+      scriptFile: userSource.scriptFile,
+      sourceId: userSource.sourceId,
+      sourceName: userSource.sourceName,
       candidateSearcher,
     }));
     return providers;
@@ -254,7 +259,35 @@ function hasConfiguredScript(config: LxProviderScriptConfig): boolean {
 
 /* 用户显式配置单个 LX 源时，默认双源池不再抢占。 */
 function hasUserConfiguredLxSource(): boolean {
-  return Boolean(env.LX_SOURCE_SCRIPT_URL || env.LX_SOURCE_SCRIPT_FILE);
+  return Boolean(resolveConfiguredUserLxSource());
+}
+
+/* 解析当前用户源配置；环境变量优先，本机 UI 导入源次之。 */
+function resolveConfiguredUserLxSource():
+  | {
+      scriptUrl?: string;
+      scriptFile?: string;
+      sourceId: string;
+      sourceName: string;
+      description: string;
+    }
+  | null {
+  if (env.LX_SOURCE_SCRIPT_URL || env.LX_SOURCE_SCRIPT_FILE) {
+    return {
+      scriptUrl: env.LX_SOURCE_SCRIPT_URL,
+      scriptFile: env.LX_SOURCE_SCRIPT_FILE,
+      sourceId: env.LX_SOURCE_ID,
+      sourceName: env.LX_SOURCE_NAME,
+      description: 'User configured LX-compatible music source',
+    };
+  }
+
+  const local = getActiveLocalLxSourceConfigSync();
+  if (!local) return null;
+  return {
+    ...local,
+    description: 'App imported LX-compatible music source',
+  };
 }
 
 /* 创建共享候选搜索器，避免 lx-primary 失败后 lx-secondary 重复请求 Kuwo 搜索。 */

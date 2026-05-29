@@ -7,6 +7,7 @@
 
 import type { ChatResponse, NowResponse, Track } from '@claudio/api';
 import { env } from '../env.js';
+import type { PersonalContext } from '../personal/profileTypes.js';
 import type { MusicRequestKind } from '../radio/intentParser.js';
 import { buildDjPrompt, buildMusicIntentPrompt, buildTrackCommentaryPrompt } from './prompt.js';
 
@@ -29,6 +30,7 @@ export interface GenerateDjResponseInput {
   selectedTrack: Track;
   candidateTracks: Track[];
   requestKind?: MusicRequestKind;
+  personalContext?: PersonalContext;
 }
 
 export interface MusicIntent {
@@ -48,6 +50,7 @@ export interface GenerateMusicIntentInput {
   modelDisplayName: string;
   playbackState: NowResponse['state'];
   currentTrack: Track | null;
+  personalContext?: PersonalContext;
 }
 
 export interface GenerateTrackCommentaryInput {
@@ -461,7 +464,10 @@ function sanitizeDjText(value: string | undefined): string | undefined {
     .replace(/把音量调小[^，。！？!?]*[，。！？!?]?/g, '')
     .replace(/调小音量[^，。！？!?]*[，。！？!?]?/g, '')
     .replace(/调低音量[^，。！？!?]*[，。！？!?]?/g, '')
-    .replace(/(?:系统|接口|模型|音源|provider|API|JSON)[^，。！？!?]*(?:不可用|失败|错误|返回|解析)[，。！？!?]?/gi, '')
+    .replace(
+      /(?:系统|接口|模型|音源|provider|API|JSON)[^，。！？!?]*(?:不可用|失败|错误|返回|解析)[，。！？!?]?/gi,
+      '',
+    )
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -474,7 +480,9 @@ function isReliableDjScript(value: string, selectedTrack: Track): boolean {
   if (title && !compact.includes(title)) return false;
   if (/^(?:安排|收到|好|行|来)[，。,.！!\s]*(?:先听|进歌|播放|给你放)/u.test(compact)) return false;
 
-  return /(?:人声|嗓音|鼓|低频|节奏|旋律|编曲|吉他|贝斯|钢琴|合成器|前奏|副歌|音色|空间|颗粒|律动|呼吸|胸口|肩膀|耳朵|身体|现场|制作|版本)/u.test(compact);
+  return /(?:人声|嗓音|鼓|低频|节奏|旋律|编曲|吉他|贝斯|钢琴|合成器|前奏|副歌|音色|空间|颗粒|律动|呼吸|胸口|肩膀|耳朵|身体|现场|制作|版本)/u.test(
+    compact,
+  );
 }
 
 /*
@@ -605,8 +613,9 @@ function isGenericMusicPhrase(value: string): boolean {
   if (!trimmed) return true;
 
   return (
-    /^(?:伤感|悲伤|难过|失恋|emo|治愈|温柔|放松|安静|睡前|摇滚|热血|燃|怀旧|经典|老歌)$/u.test(trimmed) ||
-    /(?:歌曲|音乐|曲子|类型|风格|歌单|一些|几首|好听|适合|类似)$/u.test(trimmed)
+    /^(?:伤感|悲伤|难过|失恋|emo|治愈|温柔|放松|安静|睡前|摇滚|热血|燃|怀旧|经典|老歌)$/u.test(
+      trimmed,
+    ) || /(?:歌曲|音乐|曲子|类型|风格|歌单|一些|几首|好听|适合|类似)$/u.test(trimmed)
   );
 }
 
@@ -637,7 +646,11 @@ function normalizeStringList(value: unknown, maxItems: number, maxLength: number
  * 规范化 play 字段。
  * 模型没有给有效曲名时，使用预选曲目标题，保证播放器和文案始终有一致锚点。
  */
-function normalizePlayList(value: unknown, selectedTrack: Track, candidateTracks: Track[]): string[] {
+function normalizePlayList(
+  value: unknown,
+  selectedTrack: Track,
+  candidateTracks: Track[],
+): string[] {
   if (!Array.isArray(value)) return [selectedTrack.title];
 
   const selectableTracks = [selectedTrack, ...candidateTracks];

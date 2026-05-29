@@ -25,6 +25,11 @@ import {
   getTrackKey,
 } from '../radio/playbackQueue.js';
 import {
+  createPresenceState,
+  updatePresenceFromPlaybackMove,
+  type DjSessionPresence,
+} from '../radio/presenceEngine.js';
+import {
   createSessionMemory,
   markTrackSeen,
   maybeRefillQueue as maybeRefillSessionQueue,
@@ -51,6 +56,7 @@ interface RadioState {
   activeIntent: RadioSessionIntent | null;
   sessionMemory: ReturnType<typeof createSessionMemory>;
   trackCommentaryMemory: ReturnType<typeof createTrackCommentaryMemory>;
+  presence: DjSessionPresence;
 }
 
 export interface ChatResult {
@@ -70,6 +76,7 @@ const radioState: RadioState = {
   activeIntent: null,
   sessionMemory: createSessionMemory(),
   trackCommentaryMemory: createTrackCommentaryMemory(),
+  presence: createPresenceState(),
 };
 
 let chatQueue: Promise<void> = Promise.resolve();
@@ -132,7 +139,9 @@ async function runChatWithTimeout(request: ChatRequest): Promise<ChatResult> {
   let timeout: ReturnType<typeof setTimeout> | null = null;
   const timeoutResult = new Promise<ChatResult>((resolve) => {
     timeout = setTimeout(() => {
-      console.warn(`[radio] chat timed out after ${CHAT_TOTAL_TIMEOUT_MS}ms: ${request.text.slice(0, 80)}`);
+      console.warn(
+        `[radio] chat timed out after ${CHAT_TOTAL_TIMEOUT_MS}ms: ${request.text.slice(0, 80)}`,
+      );
       resolve(buildTimedOutChatResult(request.text));
     }, CHAT_TOTAL_TIMEOUT_MS);
   });
@@ -168,6 +177,8 @@ async function handleChatInternal(request: ChatRequest): Promise<ChatResult> {
     currentModel: getCurrentModel(),
     playbackState: radioState.playbackState,
     currentTrack: radioState.currentTrack,
+    recentTracks: radioState.queue.slice(0, radioState.currentIndex + 1).map(cloneTrack),
+    presence: radioState.presence,
   });
 
   /* 队列翻篇或清空时取消旧预热任务，再由提交后的真实队列重新调度。 */
@@ -194,6 +205,7 @@ async function handleChatInternal(request: ChatRequest): Promise<ChatResult> {
   radioState.queue = plan.queue;
   radioState.currentIndex = 0;
   radioState.activeIntent = plan.activeIntent;
+  radioState.presence = plan.presence;
   resetSessionMemory(plan.queue);
   radioState.messages = [...radioState.messages, plan.response].slice(-20);
 
@@ -207,7 +219,7 @@ async function handleChatInternal(request: ChatRequest): Promise<ChatResult> {
    */
   if (plan.shouldScheduleTts) {
     const chatId = nextChatId();
-    scheduleTts(plan.response.say, chatId);
+    scheduleTts(plan.response.say, chatId, { style: plan.personalContext.ttsStyle });
   }
 
   return {
@@ -271,6 +283,10 @@ function moveToQueueIndex(index: number, cause: 'next' | 'previous'): PlaybackMo
   radioState.currentIndex = index;
   radioState.currentTrack = cloneTrack(track);
   radioState.playbackState = 'playing';
+  radioState.presence = updatePresenceFromPlaybackMove({
+    current: radioState.presence,
+    cause,
+  });
 
   const nextTrack = radioState.queue[radioState.currentIndex + 1] ?? null;
   if (nextTrack) schedulePreload(nextTrack);
@@ -316,7 +332,9 @@ export function getPlaybackCapabilities(): PlaybackCapabilities {
     currentTrack: radioState.currentTrack,
     queue: radioState.queue,
     currentIndex: radioState.currentIndex,
-    canAutoRefill: Boolean(radioState.activeIntent && radioState.activeIntent.requestKind !== 'explicit'),
+    canAutoRefill: Boolean(
+      radioState.activeIntent && radioState.activeIntent.requestKind !== 'explicit',
+    ),
   });
 }
 
@@ -378,7 +396,11 @@ function getRemainingQueueCount(): number {
  * 调度切歌短播报。
  * 播报是附加体验：不阻塞切歌，不阻塞队列续推，任何失败都静默回退或丢弃。
  */
-function scheduleTrackCommentary(track: Track, cause: 'next' | 'previous', previousTrack?: Track | null): void {
+function scheduleTrackCommentary(
+  track: Track,
+  cause: 'next' | 'previous',
+  previousTrack?: Track | null,
+): void {
   scheduleTrackCommentaryService({
     memory: radioState.trackCommentaryMemory,
     track,
@@ -409,5 +431,3 @@ function broadcastTrackCommentary(trackId: string, response: ChatResponse): void
     ...(response.reason ? { reason: response.reason } : {}),
   });
 }
-
-

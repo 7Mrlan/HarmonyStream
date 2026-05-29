@@ -19,6 +19,7 @@ import { AppState, Keyboard, Platform, ScrollView, useWindowDimensions, View } f
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   createApiClient,
+  type ListeningEventType,
   type ModelInfo,
   type PlaybackCapabilities,
   type StreamEvent,
@@ -34,18 +35,32 @@ import {
   NowPlayingBar,
   OnAirIndicator,
   PixelClock,
-  // PetCompanion,
+  PetCompanion,
   PlaybackProgressBar,
   PlayerControls,
   TopBar,
   TrackArtworkPanel,
   UserBubble,
+  type MusicSpectrumMode,
 } from '@claudio/ui';
-import { getApiBaseUrl } from './_config/api';
+import { getApiBaseUrl, getApiSharedToken } from './_config/api';
+import { MusicSourcePanel } from './_components/MusicSourcePanel';
+import { useAudioBreath } from './_hooks/useAudioBreath';
 import { useNowPlayingMedia } from './_hooks/useNowPlayingMedia';
 import { useRadioPlayer, type RadioTrack } from './_hooks/useRadioPlayer';
 import { useStationController } from './_hooks/useStationController';
 import { useTtsPlayer } from './_hooks/useTtsPlayer';
+import {
+  deriveClaudioLifeState,
+  type ClaudioLifeState,
+} from './_utils/claudioLifeState';
+import { shouldRecordMusicFeedback } from './_utils/listeningFeedback';
+import {
+  derivePresenceVisualTone,
+  getPresenceToneVisualPatch,
+  mapPresenceToneToSpectrumMode,
+  type PresenceVisualTone,
+} from './_utils/presenceVisualTone';
 import { mapApiTrackToRadioTrack, mapApiTracksToRadioTracks } from './_utils/trackMapping';
 
 /* DJ 默认文案：服务端未接入前的首屏提示，不再作为业务响应来源 */
@@ -69,6 +84,14 @@ interface UserMessage {
   time: string;
 }
 
+interface ClaudioLifeVisualState {
+  onAirOnline: boolean;
+  onAirLabel: string;
+  nowState: string;
+  avatarColor: string;
+  spectrumMode: MusicSpectrumMode;
+}
+
 const DEFAULT_PLAYBACK_CAPABILITIES: PlaybackCapabilities = {
   canPrevious: false,
   canNext: false,
@@ -76,6 +99,83 @@ const DEFAULT_PLAYBACK_CAPABILITIES: PlaybackCapabilities = {
   currentIndex: 0,
   canAutoRefill: false,
 };
+
+/*
+ * Claudio 生命状态到 UI primitive props 的穷尽映射。
+ * 新增生命状态时 TypeScript 会要求这里同步补齐展示语义。
+ */
+const CLAUDIO_LIFE_VISUALS = {
+  offline: {
+    onAirOnline: false,
+    onAirLabel: 'OFFLINE',
+    nowState: 'OFFLINE',
+    avatarColor: '#121212',
+    spectrumMode: 'off',
+  },
+  connecting: {
+    onAirOnline: true,
+    onAirLabel: 'LINKING',
+    nowState: 'CONNECTING',
+    avatarColor: '#111827',
+    spectrumMode: 'idle',
+  },
+  tuning: {
+    onAirOnline: true,
+    onAirLabel: 'TUNING',
+    nowState: 'TUNING',
+    avatarColor: '#001a0f',
+    spectrumMode: 'medium',
+  },
+  speaking: {
+    onAirOnline: true,
+    onAirLabel: 'VOICE',
+    nowState: 'VOICE',
+    avatarColor: '#10251b',
+    spectrumMode: 'low',
+  },
+  listening: {
+    onAirOnline: true,
+    onAirLabel: 'ON AIR',
+    nowState: 'PLAYING',
+    avatarColor: '#0a0a0a',
+    spectrumMode: 'high',
+  },
+  sleeping: {
+    onAirOnline: true,
+    onAirLabel: 'SLEEP',
+    nowState: 'SLEEPING',
+    avatarColor: '#080808',
+    spectrumMode: 'asleep',
+  },
+  breathing: {
+    onAirOnline: true,
+    onAirLabel: 'STANDBY',
+    nowState: 'STANDBY',
+    avatarColor: '#0a0a0a',
+    spectrumMode: 'idle',
+  },
+} satisfies Record<ClaudioLifeState, ClaudioLifeVisualState>;
+
+/*
+ * 把 Claudio 生命状态映射成 UI primitive props。
+ * UI 包不理解移动端业务状态，只接收展示文案、颜色和频谱强度。
+ */
+function getClaudioLifeVisualState(
+  state: ClaudioLifeState,
+  presenceTone: PresenceVisualTone,
+): ClaudioLifeVisualState {
+  const base = CLAUDIO_LIFE_VISUALS[state];
+  const patch =
+    state === 'listening' || state === 'breathing' || state === 'sleeping'
+      ? getPresenceToneVisualPatch(presenceTone)
+      : {};
+
+  return {
+    ...base,
+    ...patch,
+    spectrumMode: mapPresenceToneToSpectrumMode(presenceTone, base.spectrumMode),
+  };
+}
 
 /*
  * 生成当前 UI 时间戳。
@@ -101,6 +201,14 @@ function getRadioTrackKey(track: RadioTrack | null | undefined): string {
 }
 
 /*
+ * 判断移动端当前曲是否能进入听歌行为记忆。
+ * 空队列占位曲不能写入，否则会污染用户画像。
+ */
+function isRecordableRadioTrack(track: RadioTrack): boolean {
+  return Boolean(track.url && track.title.trim() && track.title !== '—');
+}
+
+/*
  * 旧服务端没有 playback 字段时的保守推断。
  * 只在 bootstrap 首屏使用；后续缺字段的 queue-update 会保持上一份 capability。
  */
@@ -122,7 +230,10 @@ export default function HomeScreen() {
   const isWide = winWidth >= WIDE_BREAKPOINT;
 
   /* Claudio API client：集中读取 base URL，页面不散写 fetch 地址 */
-  const apiClient = useMemo(() => createApiClient({ baseUrl: getApiBaseUrl() }), []);
+  const apiClient = useMemo(
+    () => createApiClient({ baseUrl: getApiBaseUrl(), authToken: getApiSharedToken() }),
+    [],
+  );
   /* 服务端模型列表，控制 TopBar 模型展示 */
   const [models, setModels] = useState<ModelInfo[]>([]);
   /* 当前模型 id；切换入口后续由新的模型菜单重新接入。 */
@@ -184,6 +295,41 @@ export default function HomeScreen() {
   useEffect(() => {
     currentTrackKeyRef.current = currentTrackKey;
   }, [currentTrackKey]);
+
+  /*
+   * 收藏状态跟随当前曲重置。
+   * 第一版只记录“收藏”事件，不做取消收藏的历史事件回滚。
+   */
+  useEffect(() => {
+    setFaved(false);
+  }, [currentTrackKey]);
+
+  /*
+   * 写入当前曲相关的听歌行为。
+   * 记忆写入失败不影响播放、聊天或 UI 状态，只在服务端日志里留下失败原因。
+   */
+  const recordListeningEventForCurrentTrack = useCallback(
+    (type: ListeningEventType, text?: string) => {
+      const feedbackText = text?.trim();
+      const canAttachTrack = isRecordableRadioTrack(radio.track);
+      if (type !== 'feedback' && !canAttachTrack) return;
+      if (type === 'feedback' && !feedbackText) return;
+
+      void apiClient
+        .recordListeningEvent({
+          type,
+          ...(canAttachTrack
+            ? {
+                title: radio.track.title,
+                ...(radio.track.artist ? { artist: radio.track.artist } : {}),
+              }
+            : {}),
+          ...(feedbackText ? { text: feedbackText } : {}),
+        })
+        .catch(() => undefined);
+    },
+    [apiClient, radio.track],
+  );
 
   /*
    * 封面加载失败时切回原时钟占位。
@@ -264,6 +410,39 @@ export default function HomeScreen() {
     setPlaybackCapabilities,
   });
   const { playVoice } = station;
+  /*
+   * Claudio 生命状态只在 HomeScreen 聚合一次。
+   * 它只驱动 UI 展示，不反向控制播放器、语音或网络。
+   */
+  const claudioLifeState = deriveClaudioLifeState({
+    connectionState,
+    djLoading,
+    chatSending,
+    voiceSpeaking: tts.playing,
+    musicDucked: station.musicDucked,
+    listening: animationActive,
+    stationPaused,
+    stationPlaying: station.stationPlaying,
+  });
+  const presenceVisualTone = derivePresenceVisualTone({
+    lifeState: claudioLifeState,
+    latestUserText: latestUserMessage?.text,
+    stationPaused,
+    listening: animationActive,
+  });
+  const claudioLifeVisual = getClaudioLifeVisualState(claudioLifeState, presenceVisualTone);
+  /*
+   * Phase N：频谱强度由真实 Web Audio analyser 或明确的播放 envelope fallback 驱动。
+   * 这里不把 fallback 伪装成 FFT；UI 只消费 0-1 强度和来源标记。
+   */
+  const audioBreath = useAudioBreath({
+    trackUrl: radio.track.url || null,
+    playing: animationActive,
+    position: radio.position,
+    duration: radio.duration,
+    lifeState: claudioLifeState,
+    presenceTone: presenceVisualTone,
+  });
 
   /*
    * 同一首歌只触发一次预热：用 ref 记录已经发起预热的 track url。
@@ -445,6 +624,9 @@ export default function HomeScreen() {
       setDjLoading(true);
       setDjTime(sentAt);
       setLatestUserMessage({ text, time: sentAt });
+      if (shouldRecordMusicFeedback(text)) {
+        recordListeningEventForCurrentTrack('feedback', text);
+      }
 
       try {
         const response = await apiClient.sendChat({ text, voice: ttsEnabledRef.current });
@@ -463,8 +645,17 @@ export default function HomeScreen() {
         setChatSending(false);
       }
     },
-    [apiClient, refreshNowAndNext],
+    [apiClient, recordListeningEventForCurrentTrack, refreshNowAndNext],
   );
+
+  /*
+   * 收藏按钮只在从未收藏切到收藏时写入 favorite。
+   * 取消收藏不删除历史事件，避免第一版引入复杂回滚语义。
+   */
+  const handleFavorite = useCallback(() => {
+    if (!faved) recordListeningEventForCurrentTrack('favorite');
+    setFaved((value) => !value);
+  }, [faved, recordListeningEventForCurrentTrack]);
 
   return (
     <View className="flex-1 bg-bg">
@@ -489,6 +680,7 @@ export default function HomeScreen() {
         >
           {/* 顶部状态栏（带 AI 模型徽章，集中展示当前模型） */}
           <TopBar modelName={currentModelName} />
+          <MusicSourcePanel apiClient={apiClient} />
 
           {/* 封面 / 时钟 + ON AIR：有歌曲封面时优先展示封面，失败时回退时钟。 */}
           <View className="items-center pt-4 pb-6 px-4">
@@ -510,7 +702,10 @@ export default function HomeScreen() {
               </>
             )}
             <View className="mt-3">
-              <OnAirIndicator />
+              <OnAirIndicator
+                online={claudioLifeVisual.onAirOnline}
+                label={claudioLifeVisual.onAirLabel}
+              />
             </View>
           </View>
 
@@ -519,12 +714,21 @@ export default function HomeScreen() {
             title={radio.track.title}
             artist={radio.track.artist}
             playing={radio.playing}
-            state={radio.error ? 'ERROR' : radio.buffering ? 'BUFFERING' : undefined}
+            state={
+              radio.error ? 'ERROR' : radio.buffering ? 'BUFFERING' : claudioLifeVisual.nowState
+            }
           />
 
           {/* 律动主视觉：用户原版 48 根霓虹频谱条，跟随真实播放状态律动 */}
           <View className="px-4 pt-2 pb-3">
-            <MusicSpectrum active={animationActive} ended={radio.ended} height={200} />
+            <MusicSpectrum
+              active={animationActive}
+              mode={claudioLifeVisual.spectrumMode}
+              intensity={audioBreath.intensity}
+              intensitySource={audioBreath.source}
+              ended={radio.ended}
+              height={200}
+            />
           </View>
 
           {/* Reanimated 播放进度条：位于频谱与控件之间，拖动结束后再提交真实 seek */}
@@ -550,7 +754,7 @@ export default function HomeScreen() {
             onPlayPause={station.toggleStation}
             onNext={station.nextTrack}
             onStop={station.stopStation}
-            onFav={() => setFaved((f) => !f)}
+            onFav={handleFavorite}
           />
 
           {/* DJ 长文气泡 */}
@@ -561,6 +765,7 @@ export default function HomeScreen() {
             loading={djLoading}
             voiceActive={ttsEnabled}
             voiceDisabled={chatSending}
+            avatarColor={claudioLifeVisual.avatarColor}
             onVoiceToggle={station.toggleVoiceEnabled}
             onReplay={station.replayVoice}
           />
@@ -589,13 +794,15 @@ export default function HomeScreen() {
       </View>
 
       {/* Phase Pet prototype：贴边系统伴侣，默认避开底部输入区，可拖拽和收起。 */}
-      {/* <PetCompanion
+      <PetCompanion
+        lifeState={claudioLifeState}
+        presenceTone={presenceVisualTone}
         listening={animationActive}
         speaking={tts.playing}
         thinking={djLoading}
         topInset={insets.top}
-        bottomInset={insets.bottom}
-      /> */}
+        bottomOffset={insets.bottom + androidKbHeight + 92}
+      />
     </View>
   );
 }

@@ -21,13 +21,23 @@ export { DotMatrixBackground } from './DotMatrixBackground';
 export type { DotMatrixBackgroundProps } from './DotMatrixBackground';
 
 export { MusicSpectrum } from './MusicSpectrum';
-export type { MusicSpectrumProps } from './MusicSpectrum';
+export type { MusicSpectrumIntensitySource, MusicSpectrumMode, MusicSpectrumProps } from './MusicSpectrum';
 
 export { NowPlayingBar } from './NowPlayingBar';
 export type { NowPlayingBarProps } from './NowPlayingBar';
 
 export { PlaybackProgressBar } from './PlaybackProgressBar';
 export type { PlaybackProgressBarProps } from './PlaybackProgressBar';
+
+export { PetCompanion } from './PetCompanion';
+export type { PetCompanionProps } from './PetCompanion';
+export { derivePetCompanionState } from './pet/petBrain';
+export type {
+  PetBrainInput,
+  PetCompanionLifeState,
+  PetCompanionPresenceTone,
+  PetCompanionState,
+} from './pet/petTypes';
 
 export { OnAirIndicator } from './OnAirIndicator';
 export type { OnAirIndicatorProps } from './OnAirIndicator';
