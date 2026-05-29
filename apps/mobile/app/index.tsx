@@ -45,6 +45,7 @@ import {
 } from '@claudio/ui';
 import { getApiBaseUrl, getApiSharedToken } from './_config/api';
 import { MusicSourcePanel } from './_components/MusicSourcePanel';
+import { useAudioBreath } from './_hooks/useAudioBreath';
 import { useNowPlayingMedia } from './_hooks/useNowPlayingMedia';
 import { useRadioPlayer, type RadioTrack } from './_hooks/useRadioPlayer';
 import { useStationController } from './_hooks/useStationController';
@@ -430,6 +431,18 @@ export default function HomeScreen() {
     listening: animationActive,
   });
   const claudioLifeVisual = getClaudioLifeVisualState(claudioLifeState, presenceVisualTone);
+  /*
+   * Phase N：频谱强度由真实 Web Audio analyser 或明确的播放 envelope fallback 驱动。
+   * 这里不把 fallback 伪装成 FFT；UI 只消费 0-1 强度和来源标记。
+   */
+  const audioBreath = useAudioBreath({
+    trackUrl: radio.track.url || null,
+    playing: animationActive,
+    position: radio.position,
+    duration: radio.duration,
+    lifeState: claudioLifeState,
+    presenceTone: presenceVisualTone,
+  });
 
   /*
    * 同一首歌只触发一次预热：用 ref 记录已经发起预热的 track url。
@@ -711,6 +724,8 @@ export default function HomeScreen() {
             <MusicSpectrum
               active={animationActive}
               mode={claudioLifeVisual.spectrumMode}
+              intensity={audioBreath.intensity}
+              intensitySource={audioBreath.source}
               ended={radio.ended}
               height={200}
             />

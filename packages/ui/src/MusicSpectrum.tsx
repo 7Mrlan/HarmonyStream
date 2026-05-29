@@ -25,6 +25,10 @@ export interface MusicSpectrumProps {
   active: boolean;
   /* 展示强度模式；只描述频谱视觉能量，不理解业务 life state。 */
   mode?: MusicSpectrumMode;
+  /* Phase N 音频呼吸强度；0-1，来源由移动端 hook 决定。 */
+  intensity?: number;
+  /* Phase N 内部来源标记；UI 包不展示文案，只保留调试语义。 */
+  intensitySource?: MusicSpectrumIntensitySource;
   /* 是否已经播放结束，用于让动画回到刷新后的 idle 状态 */
   ended?: boolean;
   /* 音频可视化容器高度 */
@@ -43,6 +47,7 @@ export interface MusicSpectrumProps {
 
 type SkiaModule = typeof import('@shopify/react-native-skia');
 export type MusicSpectrumMode = 'off' | 'asleep' | 'idle' | 'low' | 'medium' | 'high';
+export type MusicSpectrumIntensitySource = 'web-audio' | 'playback-envelope' | 'idle' | 'off';
 
 const DEFAULT_WIDTH = 900;
 const DEFAULT_HEIGHT = 200;
@@ -123,13 +128,27 @@ function resolveBarCount(containerWidth: number, explicitCount?: number): number
   return 48;
 }
 
+/* 工具：把外部音频强度固定到 0-1，防止异常 analyser 数据撑爆频谱。 */
+function clampSpectrumLevel(level: number): number {
+  if (!Number.isFinite(level)) return 0;
+  return Math.max(0, Math.min(1, level));
+}
+
 /*
  * 工具：把外部展示模式压成 0-1 能量值。
  * 未传 mode 时完全沿用旧 active 行为，保证旧调用不受影响。
+ * 传入 intensity 时，真实 / fallback 音频强度接管播放态能量；mode 仍作为停播和最低呼吸语义。
  */
-function resolveSpectrumLevel(active: boolean, mode?: MusicSpectrumMode): number {
-  if (mode) return MODE_LEVELS[mode];
-  return active ? MODE_LEVELS.high : MODE_LEVELS.off;
+function resolveSpectrumLevel(active: boolean, mode?: MusicSpectrumMode, intensity?: number): number {
+  const baseLevel = mode ? MODE_LEVELS[mode] : active ? MODE_LEVELS.high : MODE_LEVELS.off;
+  if (mode === 'off') return 0;
+  if (intensity === undefined) return baseLevel;
+
+  const audioLevel = clampSpectrumLevel(intensity);
+  if (!active) return Math.max(baseLevel, audioLevel);
+
+  const activeFloor = mode === 'asleep' || mode === 'idle' ? baseLevel : Math.min(baseLevel, 0.22);
+  return clampSpectrumLevel(Math.max(activeFloor, audioLevel));
 }
 
 /* 工具：按 explame.html 的 `.v-bar` 三段线性渐变创建 Web 频谱柱填充。 */
@@ -322,13 +341,14 @@ function NativeSpectrumCanvas({
 function NativeMusicSpectrum({
   active,
   mode,
+  intensity,
   height = DEFAULT_HEIGHT,
   width,
   color = '#00ff9d',
   barCount,
 }: MusicSpectrumProps) {
   const skia = getSkiaModule();
-  const visualLevel = resolveSpectrumLevel(active, mode);
+  const visualLevel = resolveSpectrumLevel(active, mode, intensity);
   const [containerWidth, setContainerWidth] = useState(width ?? DEFAULT_WIDTH);
   const [renderCanvas, setRenderCanvas] = useState(visualLevel > 0);
   const activeLevel = useSharedValue(visualLevel);
@@ -396,12 +416,13 @@ const MemoNativeMusicSpectrum = memo(NativeMusicSpectrum);
 function WebMusicSpectrum({
   active,
   mode,
+  intensity,
   height = DEFAULT_HEIGHT,
   width,
   color = '#00ff9d',
   barCount: explicitBarCount,
 }: MusicSpectrumProps) {
-  const visualLevel = resolveSpectrumLevel(active, mode);
+  const visualLevel = resolveSpectrumLevel(active, mode, intensity);
   const [containerWidth, setContainerWidth] = useState(width ?? DEFAULT_WIDTH);
   const barCount = useMemo(
     () => resolveBarCount(containerWidth, explicitBarCount),
@@ -412,6 +433,9 @@ function WebMusicSpectrum({
   const rafRef = useRef<number | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const entranceStartRef = useRef<number | null>(null);
+  const visualLevelRef = useRef(visualLevel);
+  const drawFrameRef = useRef<(() => void) | null>(null);
+  visualLevelRef.current = visualLevel;
 
   /* Web 降级使用单 canvas 绘制，避免 48 个 React / SVG 节点长期占用 JS。 */
   useEffect(() => {
@@ -434,7 +458,7 @@ function WebMusicSpectrum({
     canvas.style.width = '100%';
     canvas.style.height = `${height}px`;
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
-    if (visualLevel > 0) {
+    if (visualLevelRef.current > 0) {
       frequenciesRef.current.fill(0);
       capPositionsRef.current.fill(0);
       entranceStartRef.current = null;
@@ -449,30 +473,31 @@ function WebMusicSpectrum({
       entranceStartRef.current = start;
       const barWidth = Math.max(1, (containerWidth - (barCount - 1) * BAR_GAP) / barCount);
       let maxMovingValue = 0;
+      const level = visualLevelRef.current;
 
       context.clearRect(0, 0, containerWidth, height);
 
       frequencies.forEach((frequency, index) => {
         let target: number;
 
-        if (visualLevel > 0) {
+        if (level > 0) {
           const noise = Math.random();
           const wave = Math.sin(now * 0.005 + index * 0.2) * 20;
-          target = 5 + visualLevel * (15 + noise * 70 + wave);
+          target = 5 + level * (15 + noise * 70 + wave);
           const centerDistance = Math.abs(index - barCount / 2) / (barCount / 2);
           target *= 1 - centerDistance * 0.6;
         } else {
           target = 0;
         }
 
-        frequencies[index] = resolveBarLevel(frequency, target, visualLevel > 0.05);
+        frequencies[index] = resolveBarLevel(frequency, target, level > 0.05);
 
         const nextFrequency = frequencies[index] ?? 0;
         if (nextFrequency > (capPositions[index] ?? 0)) {
           capPositions[index] = nextFrequency;
         } else {
           capPositions[index] =
-            (capPositions[index] ?? 0) - CAP_FALL_SPEED * (visualLevel > 0.05 ? 1 : 4);
+            (capPositions[index] ?? 0) - CAP_FALL_SPEED * (level > 0.05 ? 1 : 4);
         }
         if ((capPositions[index] ?? 0) < 0) {
           capPositions[index] = 0;
@@ -487,12 +512,12 @@ function WebMusicSpectrum({
         const capY = height - capBottom - CAP_HEIGHT - CAP_TOP_OFFSET;
 
         drawWebBar(context, x, y, barWidth, barHeight, height, color);
-        drawWebCap(context, x, capY, barWidth, color, Math.max(0.25, visualLevel));
+        drawWebCap(context, x, capY, barWidth, color, Math.max(0.25, level));
 
         maxMovingValue = Math.max(maxMovingValue, nextFrequency, capPositions[index] ?? 0);
       });
 
-      if (visualLevel > 0 || maxMovingValue > 1) {
+      if (level > 0 || maxMovingValue > 1) {
         rafRef.current = requestAnimationFrame(updateVisualizer);
       } else {
         context.clearRect(0, 0, containerWidth, height);
@@ -503,17 +528,25 @@ function WebMusicSpectrum({
       }
     }
 
+    drawFrameRef.current = updateVisualizer;
     if (rafRef.current != null) {
       cancelAnimationFrame(rafRef.current);
     }
     rafRef.current = requestAnimationFrame(updateVisualizer);
     return () => {
+      drawFrameRef.current = null;
       if (rafRef.current != null) {
         cancelAnimationFrame(rafRef.current);
         rafRef.current = null;
       }
     };
-  }, [barCount, color, containerWidth, height, visualLevel]);
+  }, [barCount, color, containerWidth, height]);
+
+  /* Web 端音频强度会频繁变化：只启动/恢复 RAF，不重建 canvas effect。 */
+  useEffect(() => {
+    if (visualLevel <= 0 || rafRef.current != null || !drawFrameRef.current) return;
+    rafRef.current = requestAnimationFrame(drawFrameRef.current);
+  }, [visualLevel]);
 
   return (
     <View
