@@ -63,7 +63,7 @@ describe('loadUserMusicProfile', () => {
     );
     await writeFile(
       join(dir, 'mood-rules.md'),
-      '- 开心: keywords=开心,快乐 | tags=开心,明亮 | tts=带一点笑意\n',
+      '- 开心: keywords=开心,快乐 | tags=开心,明亮 | comfort=celebrate | curve=bright | constraints=别说教 | tts=带一点笑意\n',
     );
 
     const profile = await loadUserMusicProfile({ profileDir: dir });
@@ -78,6 +78,9 @@ describe('loadUserMusicProfile', () => {
       mood: '开心',
       keywords: ['开心', '快乐'],
       preferredTags: ['开心', '明亮'],
+      comfortMode: 'celebrate',
+      energyCurve: 'bright',
+      constraints: ['别说教'],
     });
     expect(profile.moodRules[0]?.ttsStyle?.key).toBe('custom-带一点笑意');
   });

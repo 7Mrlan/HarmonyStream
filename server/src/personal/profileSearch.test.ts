@@ -32,6 +32,7 @@ function profile(): UserMusicProfile {
         mood: '开心',
         keywords: ['开心', '快乐'],
         preferredTags: ['开心', '明亮'],
+        constraints: [],
         ttsStyle: {
           key: 'bright-v1',
           emotion: '明亮',
@@ -42,6 +43,7 @@ function profile(): UserMusicProfile {
         mood: '怀旧',
         keywords: ['怀旧', '老歌'],
         preferredTags: ['怀旧', '老歌'],
+        constraints: [],
         ttsStyle: {
           key: 'nostalgic-v1',
           emotion: '怀旧',

@@ -23,6 +23,7 @@ import type {
   MemoryEvidence,
   MusicLibrarySection,
   MusicLibraryTrack,
+  MoodRule,
   PersonalCandidate,
   PersonalContext,
   PlaylistShape,
@@ -110,7 +111,7 @@ const NOSTALGIA_WORDS = ['怀旧', '老歌', '以前', '回忆', '旧歌', '经�
  * 这里模拟固定顺序的内置智能体：设计总监、记忆馆员、情绪陪伴、歌单策展、音乐 scout、审查。
  */
 export function buildResidentDjPlan(input: BuildResidentDjPlanInput): ResidentDjPlan {
-  const moodSignal = readMoodSignal(input.userText);
+  const moodSignal = readMoodSignal(input.userText, input.personalContext.moodRule);
   const turnPlan = buildTurnPlan(input, moodSignal);
   const sectionEvidence = rankLibrarySections(input.personalContext, turnPlan);
   const evidence = collectMemoryEvidence(input.personalContext, sectionEvidence, turnPlan);
@@ -141,7 +142,7 @@ export async function buildResidentDjPlanAsync(
 ): Promise<ResidentDjPlan> {
   const nowMs = input.nowMs ?? Date.now;
   const designStartedAt = nowMs();
-  const moodSignal = readMoodSignal(input.userText);
+  const moodSignal = readMoodSignal(input.userText, input.personalContext.moodRule);
   const turnPlan = buildTurnPlan(input, moodSignal);
   const timings: ResidentDjAgentTiming[] = [
     {
@@ -327,7 +328,10 @@ function buildTurnPlan(input: BuildResidentDjPlanInput, moodSignal: MoodSignal):
  * Mood Companion Agent。
  * 识别陪伴尺度和曲线，保持“能陪但不装治疗师”的边界。
  */
-function readMoodSignal(userText: string): MoodSignal {
+function readMoodSignal(userText: string, moodRule?: MoodRule): MoodSignal {
+  const configuredSignal = moodRule ? buildMoodRuleSignal(moodRule) : null;
+  if (configuredSignal) return configuredSignal;
+
   const text = normalizeText(userText);
   if (containsAny(text, HAPPY_WORDS)) {
     return {
@@ -362,6 +366,64 @@ function readMoodSignal(userText: string): MoodSignal {
     energyCurve: 'low-stable',
     constraints: ['只讲本轮听感', '不要假装懂用户'],
   };
+}
+
+/*
+ * 把 mood-rules.md 命中的规则转换成 Resident DJ 策略。
+ * 用户可在规则里显式写 comfort / curve；未写时只做保守推断，推断不出来就回到内置词表。
+ */
+function buildMoodRuleSignal(rule: MoodRule): MoodSignal | null {
+  const comfortMode = rule.comfortMode ?? inferComfortModeFromMoodRule(rule);
+  if (!comfortMode) return null;
+
+  const energyCurve = rule.energyCurve ?? defaultEnergyCurveForComfort(comfortMode);
+  const constraints = [
+    ...defaultConstraintsForComfort(comfortMode),
+    ...(rule.constraints ?? []),
+    rule.note ? `用户情绪规则备注：${rule.note}` : '',
+    rule.preferredTags.length > 0 ? `优先参考标签：${rule.preferredTags.join('、')}` : '',
+    `mood-rules.md 命中：${rule.mood}`,
+  ];
+
+  return {
+    comfortMode,
+    energyCurve,
+    constraints: dedupeStrings(constraints.filter(Boolean)),
+  };
+}
+
+/* mood-rules.md 未显式写 comfort 时，按规则名和标签做轻量推断。 */
+function inferComfortModeFromMoodRule(rule: MoodRule): ComfortMode | null {
+  const text = normalizeText(
+    [rule.mood, ...rule.preferredTags, ...(rule.constraints ?? []), rule.note ?? ''].join(' '),
+  );
+  if (containsAny(text, HAPPY_WORDS)) return 'celebrate';
+  if (containsAny(text, SAD_WORDS) || containsAny(text, ['伤感', '陪伴', '安慰'])) {
+    return 'sit-with-you';
+  }
+  if (containsAny(text, FOCUS_WORDS) || containsAny(text, MEETING_WORDS)) return 'focus-with-you';
+  if (containsAny(text, NOSTALGIA_WORDS)) return 'nostalgia-soft';
+  return null;
+}
+
+/* 按陪伴模式给出默认曲线。 */
+function defaultEnergyCurveForComfort(comfortMode: ComfortMode): EnergyCurve {
+  if (comfortMode === 'celebrate') return 'bright';
+  if (comfortMode === 'sit-with-you' || comfortMode === 'lift-gently') return 'rise-gently';
+  if (comfortMode === 'focus-with-you') return 'deep-focus';
+  if (comfortMode === 'nostalgia-soft') return 'wind-down';
+  return 'low-stable';
+}
+
+/* 按陪伴模式给出默认约束。 */
+function defaultConstraintsForComfort(comfortMode: ComfortMode): string[] {
+  if (comfortMode === 'celebrate') return ['可以一起开心', '不要说教', '不要压低情绪'];
+  if (comfortMode === 'sit-with-you' || comfortMode === 'lift-gently') {
+    return ['先接住情绪', '不承诺治愈', '不写鸡汤', '播放不能被深聊阻塞'];
+  }
+  if (comfortMode === 'focus-with-you') return ['低刺激', '不抢注意力', '少说话'];
+  if (comfortMode === 'nostalgia-soft') return ['怀旧但不煽情', '不要编用户故事'];
+  return ['只讲本轮听感', '不要假装懂用户'];
 }
 
 /* 判断本轮 Resident DJ 意图。 */

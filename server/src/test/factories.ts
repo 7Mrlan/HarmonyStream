@@ -8,6 +8,7 @@
 import type { Track } from '@claudio/api';
 import type {
   MusicLibrarySection,
+  MoodRule,
   PersonalContext,
   UserMusicProfile,
 } from '../personal/profileTypes.js';
@@ -33,6 +34,7 @@ export interface TestPersonalContextInput {
   tasteSummary?: string;
   promptLines?: string[];
   preferredTitles?: string[];
+  moodRule?: MoodRule;
 }
 
 /* 构造可播放测试曲目。 */
@@ -93,6 +95,7 @@ export function createPersonalContext(input: TestPersonalContextInput = {}): Per
       hour: now.getHours(),
       timeSlot: now.getHours() < 12 ? 'morning' : now.getHours() >= 22 ? 'late-night' : 'daytime',
     },
+    ...(input.moodRule ? { moodRule: input.moodRule } : {}),
     candidates: [],
     librarySections: sections,
     libraryInsights: [],

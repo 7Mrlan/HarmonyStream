@@ -64,7 +64,24 @@
 - [x] Phase N Review：真实 Web Audio 优先、fallback 明确标记、不新建第二播放器、不污染 UI 包业务边界
 - [x] Phase N 验证：终端命令 `pnpm test`；终端命令 `pnpm test:full`
 - [x] Phase N Commit：`feat: add real audio breath`
-- [ ] 最终推送：终端命令 `git push origin lwx`
+- [x] 最终推送：终端命令 `git push origin lwx`
+
+---
+
+## 当前任务 · DeepSeek 审查复核
+
+- [x] 核对 5 条问题是否真实存在。
+- [x] 修复值得立即处理的问题：`mood-rules.md` 驱动 Resident DJ comfort / curve。
+- [x] 补 `chatTurnPlanner` 编排测试，覆盖本地资料、Resident DJ 和 resolver 的集成路径。
+- [x] 终端命令：运行 `pnpm test`。
+- [x] 终端命令：运行 `pnpm test:full`。
+
+### DeepSeek 审查复核 Review
+
+- 采纳：硬编码情绪词表问题部分成立；已让命中的 `mood-rules.md` 可配置 `comfort / curve / constraints`，内置词表只作 fallback。
+- 采纳：`chatTurnPlanner` 缺少编排级测试问题成立；已新增从资料文件到 resolver 的集成测试。
+- 暂不采纳：`profileStore.ts`、`residentDj.ts` 文件偏大是真实结构债，但当前拆分收益低于回归风险。
+- 暂不采纳：`PetCompanion` 使用 SVG 是事实，但当前状态频率和 prototype 目标可接受；迁移 Skia 应等更高频形变需求明确后再做。
 
 ### Phase M Review
 

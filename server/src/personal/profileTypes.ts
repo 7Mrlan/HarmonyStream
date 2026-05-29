@@ -111,6 +111,12 @@ export interface MoodRule {
   keywords: string[];
   /* 激活后优先匹配的歌曲标签。 */
   preferredTags: string[];
+  /* 激活后建议 Resident DJ 使用的陪伴模式。 */
+  comfortMode?: ComfortMode;
+  /* 激活后建议 Resident DJ 使用的歌单能量曲线。 */
+  energyCurve?: EnergyCurve;
+  /* 激活后附加给 Resident DJ 的本轮约束。 */
+  constraints?: string[];
   /* 激活后建议的 TTS 语气。 */
   ttsStyle?: TtsStyle;
   /* 给 DJ 的短备注。 */
@@ -196,6 +202,8 @@ export interface PersonalContext {
   tasteSummary: string;
   /* 当前听歌环境。 */
   environment: ListeningEnvironment;
+  /* 当前命中的情绪规则。 */
+  moodRule?: MoodRule;
   /* 个人候选曲。 */
   candidates: PersonalCandidate[];
   /* 简单歌单分组证据。 */

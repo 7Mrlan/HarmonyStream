@@ -62,6 +62,7 @@ export async function assemblePersonalContext(
     hasUserData: profile.source === 'user-data',
     tasteSummary: profile.tasteSummary,
     environment: search.environment,
+    ...(search.mood ? { moodRule: search.mood } : {}),
     candidates: search.candidates,
     librarySections: profile.librarySections,
     libraryInsights: profile.libraryInsights,

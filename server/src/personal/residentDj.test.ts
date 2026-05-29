@@ -162,6 +162,37 @@ describe('Resident DJ plan', () => {
     expect(plan.turnPlan.constraints.join('\n')).toContain('可以一起开心');
   });
 
+  it('命中的 mood-rules.md 规则可以覆盖 Resident DJ 陪伴模式', () => {
+    const plan = buildResidentDjPlan({
+      userText: '我今天有点沮丧，想听点歌',
+      requestKind: 'range',
+      personalContext: createPersonalContext({
+        sections: [
+          section('夜尾', ['深夜', '低刺激'], [
+            { name: 'Riverside', artist: 'Agnes Obel' },
+            { name: 'Should Have Known Better', artist: 'Sufjan Stevens' },
+          ]),
+        ],
+        now: new Date('2026-05-28T23:00:00+08:00'),
+        moodRule: {
+          mood: '沮丧陪伴',
+          keywords: ['沮丧'],
+          preferredTags: ['低刺激'],
+          comfortMode: 'sit-with-you',
+          energyCurve: 'rise-gently',
+          constraints: ['别催我振作'],
+          note: '先陪一会儿',
+        },
+      }),
+    });
+
+    expect(plan.turnPlan.intent).toBe('chat-and-play');
+    expect(plan.turnPlan.comfortMode).toBe('sit-with-you');
+    expect(plan.turnPlan.energyCurve).toBe('rise-gently');
+    expect(plan.turnPlan.constraints.join('\n')).toContain('mood-rules.md 命中：沮丧陪伴');
+    expect(plan.turnPlan.constraints.join('\n')).toContain('别催我振作');
+  });
+
   it('上一轮 soft-hold presence 会让中性输入延续陪伴曲线但不固定歌曲', () => {
     const plan = buildResidentDjPlan({
       userText: '嗯，随便再来点',

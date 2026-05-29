@@ -10,7 +10,9 @@ import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type {
+  ComfortMode,
   DjMemoryPreference,
+  EnergyCurve,
   LibraryInsight,
   ListeningEvent,
   ListeningEventType,
@@ -588,14 +590,50 @@ function parseMoodLine(line: string): MoodRule | null {
   const fields = parseKeyValueParts(configPart.split('|').map((part) => part.trim()));
   const keywords = splitTags(fields.keywords ?? fields.keyword ?? moodPart);
   const preferredTags = splitTags(fields.tags ?? fields.tag ?? moodPart);
+  const comfortMode = parseComfortMode(fields.comfort ?? fields.mode ?? '');
+  const energyCurve = parseEnergyCurve(fields.curve ?? fields.energy ?? '');
 
   return {
     mood: moodPart,
     keywords,
     preferredTags,
+    constraints: splitTags(fields.constraints ?? fields.constraint ?? ''),
+    ...(comfortMode ? { comfortMode } : {}),
+    ...(energyCurve ? { energyCurve } : {}),
     ...(fields.note ? { note: fields.note } : {}),
     ...(fields.tts ? { ttsStyle: buildTextStyle(fields.tts) } : {}),
   };
+}
+
+/* 解析 mood-rules.md 里的 Resident DJ comfort 字段。 */
+function parseComfortMode(value: string): ComfortMode | undefined {
+  const normalized = value.trim();
+  if (
+    normalized === 'celebrate' ||
+    normalized === 'sit-with-you' ||
+    normalized === 'lift-gently' ||
+    normalized === 'focus-with-you' ||
+    normalized === 'nostalgia-soft' ||
+    normalized === 'neutral'
+  ) {
+    return normalized;
+  }
+  return undefined;
+}
+
+/* 解析 mood-rules.md 里的 Resident DJ curve 字段。 */
+function parseEnergyCurve(value: string): EnergyCurve | undefined {
+  const normalized = value.trim();
+  if (
+    normalized === 'low-stable' ||
+    normalized === 'rise-gently' ||
+    normalized === 'bright' ||
+    normalized === 'deep-focus' ||
+    normalized === 'wind-down'
+  ) {
+    return normalized;
+  }
+  return undefined;
 }
 
 /* 把自由文本 TTS 描述包装成内部 TtsStyle。 */
